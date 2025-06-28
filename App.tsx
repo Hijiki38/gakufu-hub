@@ -4,29 +4,41 @@ import { Button, View, StyleSheet } from "react-native";
 import { Amplify } from "aws-amplify";
 import { Authenticator, useAuthenticator } from "@aws-amplify/ui-react-native";
 
-import outputs from "./amplify_outputs.json";
+// import outputs from "./amplify_outputs.json";
 import { parseAmplifyConfig } from "aws-amplify/utils";
 
 import { get, post } from "aws-amplify/api";
 
+let outputs: any = {};
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  outputs = require("./amplify_outputs.json");
+} catch {
+  console.warn("Amplify outputs file missing - backend features disabled");
+}
+
 const amplifyConfig = parseAmplifyConfig(outputs);
+
+const restApiConfig = outputs?.custom?.API;
 
 Amplify.configure(
   {
     ...amplifyConfig,
-    API: {
-      ...amplifyConfig.API,
-      REST: outputs.custom.API,
-    },
+    ...(restApiConfig && {
+      API: {
+        ...amplifyConfig.API,
+        REST: restApiConfig,
+      },
+    }),
   },
   {
     API: {
       REST: {
         retryStrategy: {
-          strategy: 'no-retry' // Overrides default retry strategy
+          strategy: 'no-retry', // Overrides default retry strategy
         },
-      }
-    }
+      },
+    },
   }
 );
 
@@ -73,7 +85,7 @@ const ApiTestButton = () => {
 const getDataFromFrontend = () => {
   const httpOperation = get({
     apiName: 'sample-http-api',
-    path: '/',
+    path: '/items',
   });
   return httpOperation.response.then((resp) => resp.body.json());
 };
@@ -81,8 +93,8 @@ const getDataFromFrontend = () => {
 const postDataFromFrontend = (body) => {
 
   const httpOperation = post({
-    apiName: 'sample-api',
-    path: '/',
+    apiName: 'sample-http-api',
+    path: '/items',
     options: {
       body,
     }
