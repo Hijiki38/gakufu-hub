@@ -50,7 +50,6 @@ Gakufu-hub は、楽譜 PDF／画像をクラウドに保存し、**バージョ
 
   * `/apps/mobile` Expo (iOS/Android)
   * `/apps/web` Expo Web (React Native for Web)
-* 主要ライブラリ：`expo-router`, `@aws-amplify/ui-react-native`, `react-native-paper`
 
 ### 3.2 Amplify Gen 2 Backend (Code‑First)
 
