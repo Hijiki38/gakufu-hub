@@ -20,6 +20,9 @@ try {
 const amplifyConfig = parseAmplifyConfig(outputs);
 
 const restApiConfig = outputs?.custom?.API;
+const apiNameFromConfig = restApiConfig
+  ? Object.keys(restApiConfig)[0]
+  : undefined;
 
 Amplify.configure(
   {
@@ -83,17 +86,22 @@ const ApiTestButton = () => {
 }
 
 const getDataFromFrontend = () => {
+  if (!apiNameFromConfig) {
+    throw new Error('REST API is not configured');
+  }
   const httpOperation = get({
-    apiName: 'sample-http-api',
+    apiName: apiNameFromConfig,
     path: '/items',
   });
   return httpOperation.response.then((resp) => resp.body.json());
 };
 
 const postDataFromFrontend = (body) => {
-
+  if (!apiNameFromConfig) {
+    throw new Error('REST API is not configured');
+  }
   const httpOperation = post({
-    apiName: 'sample-http-api',
+    apiName: apiNameFromConfig,
     path: '/items',
     options: {
       body,
