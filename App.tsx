@@ -1,5 +1,8 @@
 import React from "react";
-import { Button, View, StyleSheet } from "react-native";
+import { Text, Button, View, StyleSheet, SafeAreaView } from "react-native";
+import { NavigationContainer } from "@react-navigation/native";
+import { createStackNavigator } from '@react-navigation/stack';
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { Amplify } from "aws-amplify";
 import { Authenticator, useAuthenticator } from "@aws-amplify/ui-react-native";
@@ -111,21 +114,47 @@ const postDataFromFrontend = (body) => {
 };
 
 const App = () => {
+  const Stack = createStackNavigator();
   return (
     <Authenticator.Provider>
       <Authenticator>
-        <SignOutButton />
+        {/* <SignOutButton />
         <ApiTestButton />
-        {/* You can add more components here to test your API */}
+        You can add more components here to test your API */}
+        <View style={styles.container}>
+          <Text style={{ fontSize: 20 }}>Amplify + Expo + React Native</Text>
+          <Button title="画像を選んでアップロード" onPress={uploadImage} />
+
+          <NavigationContainer>
+            <Stack.Navigator>
+              <Stack.Screen name="FileList" component={FileList} /> 
+              <Stack.Screen name="Update" component={PdfUpdateScreen} />
+            </Stack.Navigator>
+          </NavigationContainer>
+        </View>
       </Authenticator>
     </Authenticator.Provider>
   );
 };
 
+
 const styles = StyleSheet.create({
   signOutButton: {
     alignSelf: "flex-end",
   },
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    // alignItems: 'center',
+    //alignItems: 'flex-start',
+    backgroundColor: '#ffffff',
+    paddingTop: 10,
+  },
+  listContainer: {
+    flex: 1,
+    marginTop: 20,
+  },
 });
+
 
 export default App;
