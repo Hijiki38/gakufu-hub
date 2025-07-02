@@ -10,11 +10,21 @@ import * as FileSystem from 'expo-file-system';
 
 
 
-import type { RootStackParamList } from './src/navigation/types';
+import type { RootStackParamList } from './src/navigation/types'; // types.ts からインポート
+
+// type Params = {
+//   Update: {
+//     key: string;
+//     url: string;
+//   };
+// };
 
 export default function PdfUpdateScreen() {
   const route = useRoute<RouteProp<RootStackParamList, 'Update'>>();
-  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const navigation = useNavigation();
+  // const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  // console.log('route:', route);
+  // console.log('route.params:', route.params);
   const { key: oldKey, url: oldUrl } = route.params;
   const [loading, setLoading] = useState<boolean>(false);
   const [newPdf, setNewPdf] = useState<{ uri: string; name: string } | null>(null);
@@ -44,7 +54,7 @@ export default function PdfUpdateScreen() {
       const buffer = Buffer.from(base64, 'base64');
 
       // S3 へのアップロード処理
-      const newKey = `data/uploads/${name}`;
+      const newKey = `public/uploads/${name}`;
       const uploadResult = await uploadData({
         path: newKey,
         data: buffer,
@@ -59,11 +69,17 @@ export default function PdfUpdateScreen() {
 
       const session = await fetchAuthSession();
       console.log('Auth session:', session);
+      // const authToken = session.credentials?.sessionToken || "";
+      // if (authToken ?? undefined) {
+      //   console.log('Auth token:', authToken);
+      // } else {
+      //   console.error('Auth token is undefined');
+      // }
       const authToken = session?.tokens?.idToken?.toString() || '';
       
       // ここで差分処理のAPIを呼び出す
       // 差分抽出APIに旧PDFと新PDFのキーを送信
-      const apiname = 'sample-http-api';
+      const apiname = 'diffApi';
       try {
         const restResponse = await post({
           apiName: apiname,
@@ -93,6 +109,7 @@ export default function PdfUpdateScreen() {
       Alert.alert('エラー', '新しいPDFの差分処理に失敗しました');
     } finally {
       setLoading(false);
+      // navigation.goBack(); // 処理後に前の画面に戻る
     }
   }
 

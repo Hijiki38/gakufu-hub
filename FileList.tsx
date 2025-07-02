@@ -11,7 +11,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { list, getUrl } from 'aws-amplify/storage';
-import { RootStackParamList } from './src/navigation/types';
+import { RootStackParamList } from './src/navigation/types'; // types.ts からインポート
 
 type S3Object = {
   key: string;
@@ -20,14 +20,17 @@ type S3Object = {
 
 export default function FileList() {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  // const navigation = useNavigation();
   const [files, setFiles] = useState<S3Object[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+
+  //const navigation = useNavigation<NavigationProp<RootStackParamList>>();
 
   useEffect(() => {
     const fetchFiles = async () => {
       try {
         const { items } = await list({
-          path: 'data/uploads/',
+          path: 'public/uploads/',
           options: { listAll: true },
         });
 
@@ -41,10 +44,11 @@ export default function FileList() {
         setFiles(withUrls);
       } catch (err) {
         console.error(err);
-        } finally {
-          setLoading(false);
-        }
+      } finally {
+        setLoading(false);
       }
+      // try {
+    }
 
 
     fetchFiles();
