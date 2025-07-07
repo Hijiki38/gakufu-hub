@@ -1,5 +1,8 @@
 import React from "react";
 import { Button, View, StyleSheet } from "react-native";
+import * as DocumentPicker from "expo-document-picker";
+
+import { uploadData } from "aws-amplify/storage";
 
 import { Amplify } from "aws-amplify";
 import { Authenticator, useAuthenticator } from "@aws-amplify/ui-react-native";
@@ -96,6 +99,37 @@ const getDataFromFrontend = () => {
   return httpOperation.response.then((resp) => resp.body.json());
 };
 
+const UploadButton = () => {
+  const handleUpload = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const asset = result.assets?.[0];
+      if (!asset) {
+        return;
+      }
+
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+      const path = `data/${Date.now()}-${asset.name}`;
+
+      await uploadData({ path, data: blob }).result;
+      console.log('Uploaded', path);
+    } catch (error) {
+      console.error('Upload failed', error);
+    }
+  };
+
+  return <Button title="Upload data" onPress={handleUpload} />;
+};
+
 const postDataFromFrontend = (body) => {
   if (!apiNameFromConfig) {
     throw new Error('REST API is not configured');
@@ -116,6 +150,7 @@ const App = () => {
       <Authenticator>
         <SignOutButton />
         <ApiTestButton />
+        <UploadButton />
         {/* You can add more components here to test your API */}
       </Authenticator>
     </Authenticator.Provider>
