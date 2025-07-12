@@ -114,6 +114,10 @@ backend.auth.resources.unauthenticatedUserIamRole.attachInlinePolicy(apiPolicy);
 
 // add outputs to the configuration file
 backend.addOutput({
+  // storage: {
+  //   aws_region: "ap-northeast-1",
+  //   bucket_name: "amplify-dqrrljhk7ysty-mai-amplifydataamplifycodege-l1oukil6xiuc",
+  // },
   custom: {
     API: {
       [httpApi.httpApiName!]: {

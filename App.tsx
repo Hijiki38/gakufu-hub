@@ -29,33 +29,35 @@ try {
   console.warn("Amplify outputs file missing - backend features disabled");
 }
 
-const amplifyConfig = parseAmplifyConfig(outputs);
+// const amplifyConfig = parseAmplifyConfig(outputs);
 
-const restApiConfig = outputs?.custom?.API;
-const apiNameFromConfig = restApiConfig
-  ? Object.keys(restApiConfig)[0]
-  : undefined;
+// const restApiConfig = outputs?.custom?.API;
+// const apiNameFromConfig = restApiConfig
+//   ? Object.keys(restApiConfig)[0]
+//   : undefined;
 
-Amplify.configure(
-  {
-    ...amplifyConfig,
-    ...(restApiConfig && {
-      API: {
-        ...amplifyConfig.API,
-        REST: restApiConfig,
-      },
-    }),
-  },
-  {
-    API: {
-      REST: {
-        retryStrategy: {
-          strategy: 'no-retry', // Overrides default retry strategy
-        },
-      },
-    },
-  }
-);
+// Amplify.configure(
+//   {
+//     ...amplifyConfig,
+//     ...(restApiConfig && {
+//       API: {
+//         ...amplifyConfig.API,
+//         REST: restApiConfig,
+//       },
+//     }),
+//   },
+//   {
+//     API: {
+//       REST: {
+//         retryStrategy: {
+//           strategy: 'no-retry', // Overrides default retry strategy
+//         },
+//       },
+//     },
+//   }
+// );
+
+Amplify.configure(outputs);
 
 const SignOutButton = () => {
   const { signOut } = useAuthenticator();
@@ -67,46 +69,46 @@ const SignOutButton = () => {
   );
 };
 
-const ApiTestButton = () => {
-  const { user } = useAuthenticator();
+// const ApiTestButton = () => {
+//   const { user } = useAuthenticator();
 
-  const handleGetData = async () => {
-    try {
-      const data = await getDataFromFrontend();
-      console.log("GET Data:", data);
-    } catch (error) {
-      console.error("Error fetching data:", error);
-    }
-  };
+//   const handleGetData = async () => {
+//     try {
+//       const data = await getDataFromFrontend();
+//       console.log("GET Data:", data);
+//     } catch (error) {
+//       console.error("Error fetching data:", error);
+//     }
+//   };
 
-  const handlePostData = async () => {
-    try {
-      const body = { message: "Hello from React Native!" };
-      const data = await postDataFromFrontend(body);
-      console.log("POST Data:", data);
-    } catch (error) {
-      console.error("Error posting data:", error);
-    }
-  };
+//   const handlePostData = async () => {
+//     try {
+//       const body = { message: "Hello from React Native!" };
+//       const data = await postDataFromFrontend(body);
+//       console.log("POST Data:", data);
+//     } catch (error) {
+//       console.error("Error posting data:", error);
+//     }
+//   };
 
-  return (
-    <View>
-      <Button title="Get Data" onPress={handleGetData} />
-      <Button title="Post Data" onPress={handlePostData} />
-    </View>
-  );
-}
+//   return (
+//     <View>
+//       <Button title="Get Data" onPress={handleGetData} />
+//       <Button title="Post Data" onPress={handlePostData} />
+//     </View>
+//   );
+// }
 
-const getDataFromFrontend = () => {
-  if (!apiNameFromConfig) {
-    throw new Error('REST API is not configured');
-  }
-  const httpOperation = get({
-    apiName: apiNameFromConfig,
-    path: '/items',
-  });
-  return httpOperation.response.then((resp) => resp.body.json());
-};
+// const getDataFromFrontend = () => {
+//   if (!apiNameFromConfig) {
+//     throw new Error('REST API is not configured');
+//   }
+//   const httpOperation = get({
+//     apiName: apiNameFromConfig,
+//     path: '/items',
+//   });
+//   return httpOperation.response.then((resp) => resp.body.json());
+// };
 
 const UploadButton = () => {
   const [asset, setAsset] = useState<any>(null);
@@ -162,6 +164,8 @@ const UploadButton = () => {
       const blob = await response.blob();
       const path = `data/${repo}/${Date.now()}-${asset.name}`;
 
+      console.log('Uploading to', path);
+
       await uploadData({ path, data: blob }).result;
       console.log("Uploaded", path);
     } catch (error) {
@@ -204,26 +208,26 @@ const UploadButton = () => {
   );
 };
 
-const postDataFromFrontend = (body) => {
-  if (!apiNameFromConfig) {
-    throw new Error('REST API is not configured');
-  }
-  const httpOperation = post({
-    apiName: apiNameFromConfig,
-    path: '/items',
-    options: {
-      body,
-    }
-  });
-  return httpOperation.response.then((resp) => resp.body.json());
-};
+// const postDataFromFrontend = (body) => {
+//   if (!apiNameFromConfig) {
+//     throw new Error('REST API is not configured');
+//   }
+//   const httpOperation = post({
+//     apiName: apiNameFromConfig,
+//     path: '/items',
+//     options: {
+//       body,
+//     }
+//   });
+//   return httpOperation.response.then((resp) => resp.body.json());
+// };
 
 const App = () => {
   return (
     <Authenticator.Provider>
       <Authenticator>
         <SignOutButton />
-        <ApiTestButton />
+        {/* <ApiTestButton /> */}
         <UploadButton />
         {/* You can add more components here to test your API */}
       </Authenticator>
