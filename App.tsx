@@ -1,8 +1,17 @@
-import React from "react";
-import { Button, View, StyleSheet } from "react-native";
+import React, { useState } from "react";
+import {
+  Button,
+  View,
+  StyleSheet,
+  Modal,
+  TextInput,
+  Text,
+  Pressable,
+  ScrollView,
+} from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 
-import { uploadData } from "aws-amplify/storage";
+import { uploadData, list } from "aws-amplify/storage";
 
 import { Amplify } from "aws-amplify";
 import { Authenticator, useAuthenticator } from "@aws-amplify/ui-react-native";
@@ -100,10 +109,15 @@ const getDataFromFrontend = () => {
 };
 
 const UploadButton = () => {
-  const handleUpload = async () => {
+  const [asset, setAsset] = useState<any>(null);
+  const [repo, setRepo] = useState("");
+  const [repos, setRepos] = useState<string[]>([]);
+  const [modalVisible, setModalVisible] = useState(false);
+
+  const selectFile = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: 'application/pdf',
+        type: "application/pdf",
         copyToCacheDirectory: true,
       });
 
@@ -111,23 +125,83 @@ const UploadButton = () => {
         return;
       }
 
-      const asset = result.assets?.[0];
-      if (!asset) {
+      const picked = result.assets?.[0];
+      if (!picked) {
         return;
       }
 
-      const response = await fetch(asset.uri);
-      const blob = await response.blob();
-      const path = `data/${Date.now()}-${asset.name}`;
+      setAsset(picked);
 
-      await uploadData({ path, data: blob }).result;
-      console.log('Uploaded', path);
-    } catch (error) {
-      console.error('Upload failed', error);
+      try {
+        const { items } = await list({ path: "data/" });
+        const repoSet = new Set<string>();
+        items?.forEach((item: any) => {
+          const parts = item.path.split("/");
+          if (parts.length > 1) {
+            repoSet.add(parts[1]);
+          }
+        });
+        setRepos(Array.from(repoSet));
+      } catch (e) {
+        console.error("Failed to list repositories", e);
+      }
+
+      setModalVisible(true);
+    } catch (e) {
+      console.error("Document pick failed", e);
     }
   };
 
-  return <Button title="Upload data" onPress={handleUpload} />;
+  const upload = async () => {
+    if (!asset || !repo) {
+      return;
+    }
+
+    try {
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+      const path = `data/${repo}/${Date.now()}-${asset.name}`;
+
+      await uploadData({ path, data: blob }).result;
+      console.log("Uploaded", path);
+    } catch (error) {
+      console.error("Upload failed", error);
+    } finally {
+      setModalVisible(false);
+      setRepo("");
+      setAsset(null);
+    }
+  };
+
+  return (
+    <View>
+      <Button title="Upload data" onPress={selectFile} />
+      <Modal transparent visible={modalVisible} animationType="slide">
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Select or create repository</Text>
+            <ScrollView style={styles.repoList}>
+              {repos.map((r) => (
+                <Pressable key={r} onPress={() => setRepo(r)}>
+                  <Text style={[styles.repoItem, repo === r && styles.repoSelected]}>
+                    {r}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <TextInput
+              placeholder="Repository path"
+              value={repo}
+              onChangeText={setRepo}
+              style={styles.repoInput}
+            />
+            <Button title="Upload" onPress={upload} />
+            <Button title="Cancel" onPress={() => setModalVisible(false)} />
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
 };
 
 const postDataFromFrontend = (body) => {
@@ -160,6 +234,39 @@ const App = () => {
 const styles = StyleSheet.create({
   signOutButton: {
     alignSelf: "flex-end",
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+  modalContent: {
+    backgroundColor: "white",
+    padding: 20,
+    borderRadius: 8,
+    width: "80%",
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    marginBottom: 8,
+  },
+  repoList: {
+    maxHeight: 150,
+    marginBottom: 8,
+  },
+  repoItem: {
+    padding: 4,
+  },
+  repoSelected: {
+    backgroundColor: "#ddeeff",
+  },
+  repoInput: {
+    borderColor: "#ccc",
+    borderWidth: 1,
+    padding: 4,
+    marginBottom: 8,
   },
 });
 
