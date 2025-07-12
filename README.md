@@ -42,44 +42,7 @@ Gakufu-hub は、楽譜 PDF／画像をクラウドに保存し、**バージョ
 
 ---
 
-## 3. システム構成 (Amplify Gen 2)
-
-### 3.1 フロントエンド
-
-* **モノレポ** (pnpm or npm workspaces)
-
-  * `/apps/mobile` Expo (iOS/Android)
-  * `/apps/web` Expo Web (React Native for Web)
-
-### 3.2 Amplify Gen 2 Backend (Code‑First)
-
-```
-/amplify
-├─ backend.ts               # CDK App Entrypoint
-├─ auth/                    # Cognito UserPool / IdentityPool
-├─ storage/                 # S3 バケット (versioning=true, CORS 設定)
-├─ api/graphQL.ts           # AppSync スキーマ & Resolvers
-├─ function/diffProcessor/  # Lambda (Docker) – OpenCV 差分抽出
-└─ function/presignUrl/     # Lambda@Edge – DL 用署名 URL
-```
-
-* **Auth:** Cognito + OAuth (Google / Apple 可)
-* **Storage:** S3 (Amplify Storage) – バケット毎に versioning 有効
-* **API:** AppSync GraphQL (Code-First schema) → DynamoDB
-* **Functions:**
-
-  * `diffProcessor` (Python 3.12, OpenCV‑contrib, imagick)
-  * `presignUrl` (Node.js) – 短命 URL 生成
-* **Observability:** AWS CloudWatch Logs + X‑Ray; エラー通知 SNS → Slack
-
-### 3.3 データベース
-
-* **DynamoDB** テーブル (PK: `scoreId`, SK: `version`)
-
-  * GSI1: `ownerId` でユーザー毎の一覧
-  * GSI2: `shareToken` で共有リンク解決
-
-### 3.4 画像処理パイプライン
+## 3. アーキテクチャ
 
 1. ユーザーが新規 PDF をアップロード
 2. S3 **ObjectCreated** → EventBridge → `diffProcessor`
@@ -87,39 +50,29 @@ Gakufu-hub は、楽譜 PDF／画像をクラウドに保存し、**バージョ
 4. 結果ファイルを S3 `/diffs/{scoreId}/{version}.png` へ保存
 5. DynamoDB レコードに diff URL 追加 → クライアントに Push (AppSync subscription)
 
-### 3.5 CI/CD
-
-* **Mobile/Web**: GitHub Actions → `expo export --platform web` & `eas build`
-* **Backend**: `amplify push --yes` (Gen2) を Actions で実行
-* **Hosting**: Amplify Hosting (Preview Branches 有効)
-
-### 3.6 テスト
-
-| レイヤ | ツール                               |
-| --- | ------------------------------------- |
-| 単体 | Jest, React Testing Library, PyTest   |
-| E2E | Playwright (Web), Detox (Mobile)      |
-| CI  | GitHub Actions Matrix (node 18/20/24) |
-
----
 
 ## 4. 開発環境
 
-* **Node.js:** v24.1.0 (Amplify CLI Gen 2 は ≥18 対応)
-* **npm:** v10.x もしくは **pnpm** 推奨
-* **AWS CLI:** v2.15+ / **Amplify Gen2 CLI:** `@aws-amplify/cli@2`
-* **Docker Desktop** (diffProcessor build)
-* VSCode 推奨拡張：ESLint, Prettier, AWS Toolkit
+* **Node.js:** 24.x
+* **npm:** 11.3.0
+* **AWS CLI:** 
 
-### ローカル起動
+
+### Quick Start
 
 ```bash
-# backend サンドボックス
-amplify sandbox
+# 1. Node 18 を入れる
+nvm install 18 && nvm use 18      
 
-# Expo (モバイル & Web)
-cd apps/mobile
-expo start --web   # http://localhost:19006
+# 2. 依存を入れる
+npm ci
+
+# 3. Amplify Gen2 をローカルプレビュー
+npx amplify sandbox
+
+# 4. Expo デバッグ
+npx expo prebuild     # iOS/Android ネイティブ生成
+npx expo run:ios      # or run:android
 ```
 
 ---
