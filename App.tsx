@@ -1,9 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Button,
   View,
   StyleSheet,
-  Modal,
   TextInput,
   Text,
   Pressable,
@@ -110,13 +109,55 @@ const SignOutButton = () => {
 //   return httpOperation.response.then((resp) => resp.body.json());
 // };
 
-const UploadButton = () => {
-  const [asset, setAsset] = useState<any>(null);
-  const [repo, setRepo] = useState("");
+const UploadSection = () => {
   const [repos, setRepos] = useState<string[]>([]);
-  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
+  const [newRepoName, setNewRepoName] = useState("");
+
+  useEffect(() => {
+    const fetchRepos = async () => {
+      try {
+        const { items } = await list({ path: "data/" });
+        const repoSet = new Set<string>();
+        items?.forEach((item: any) => {
+          const parts = item.path.split("/");
+          if (parts.length > 1) {
+            repoSet.add(parts[1]);
+          }
+        });
+        setRepos(Array.from(repoSet));
+      } catch (e) {
+        console.error("Failed to list repositories", e);
+      }
+    };
+
+    fetchRepos();
+  }, []);
+
+  const refreshRepos = async () => {
+    try {
+      const { items } = await list({ path: "data/" });
+      const repoSet = new Set<string>();
+      items?.forEach((item: any) => {
+        const parts = item.path.split("/");
+        if (parts.length > 1) {
+          repoSet.add(parts[1]);
+        }
+      });
+      setRepos(Array.from(repoSet));
+    } catch (e) {
+      console.error("Failed to refresh repositories", e);
+    }
+  };
 
   const selectFile = async () => {
+    const repoName =
+      selectedRepo === "__new__" ? newRepoName.trim() : selectedRepo;
+
+    if (!repoName) {
+      return;
+    }
+
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: "application/pdf",
@@ -132,78 +173,57 @@ const UploadButton = () => {
         return;
       }
 
-      setAsset(picked);
-
-      try {
-        const { items } = await list({ path: "data/" });
-        const repoSet = new Set<string>();
-        items?.forEach((item: any) => {
-          const parts = item.path.split("/");
-          if (parts.length > 1) {
-            repoSet.add(parts[1]);
-          }
-        });
-        setRepos(Array.from(repoSet));
-      } catch (e) {
-        console.error("Failed to list repositories", e);
-      }
-
-      setModalVisible(true);
-    } catch (e) {
-      console.error("Document pick failed", e);
-    }
-  };
-
-  const upload = async () => {
-    if (!asset || !repo) {
-      return;
-    }
-
-    try {
-      const response = await fetch(asset.uri);
+      const response = await fetch(picked.uri);
       const blob = await response.blob();
-      const path = `data/${repo}/${Date.now()}-${asset.name}`;
+      const path = `data/${repoName}/${Date.now()}-${picked.name}`;
 
-      console.log('Uploading to', path);
+      console.log("Uploading to", path);
 
       await uploadData({ path, data: blob }).result;
       console.log("Uploaded", path);
-    } catch (error) {
-      console.error("Upload failed", error);
-    } finally {
-      setModalVisible(false);
-      setRepo("");
-      setAsset(null);
+
+      setSelectedRepo(null);
+      setNewRepoName("");
+
+      await refreshRepos();
+    } catch (e) {
+      console.error("Upload failed", e);
     }
   };
 
   return (
     <View>
+      <Text style={styles.modalTitle}>Repositories</Text>
+      <ScrollView style={styles.repoList}>
+        <Pressable onPress={() => setSelectedRepo("__new__")}>
+          <Text
+            style={[
+              styles.repoItem,
+              selectedRepo === "__new__" && styles.repoSelected,
+            ]}
+          >
+            新しいレポジトリ
+          </Text>
+        </Pressable>
+        {repos.map((r) => (
+          <Pressable key={r} onPress={() => setSelectedRepo(r)}>
+            <Text
+              style={[styles.repoItem, selectedRepo === r && styles.repoSelected]}
+            >
+              {r}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+      {selectedRepo === "__new__" && (
+        <TextInput
+          placeholder="Repository name"
+          value={newRepoName}
+          onChangeText={setNewRepoName}
+          style={styles.repoInput}
+        />
+      )}
       <Button title="Upload data" onPress={selectFile} />
-      <Modal transparent visible={modalVisible} animationType="slide">
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Select or create repository</Text>
-            <ScrollView style={styles.repoList}>
-              {repos.map((r) => (
-                <Pressable key={r} onPress={() => setRepo(r)}>
-                  <Text style={[styles.repoItem, repo === r && styles.repoSelected]}>
-                    {r}
-                  </Text>
-                </Pressable>
-              ))}
-            </ScrollView>
-            <TextInput
-              placeholder="Repository path"
-              value={repo}
-              onChangeText={setRepo}
-              style={styles.repoInput}
-            />
-            <Button title="Upload" onPress={upload} />
-            <Button title="Cancel" onPress={() => setModalVisible(false)} />
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 };
@@ -228,7 +248,7 @@ const App = () => {
       <Authenticator>
         <SignOutButton />
         {/* <ApiTestButton /> */}
-        <UploadButton />
+        <UploadSection />
         {/* You can add more components here to test your API */}
       </Authenticator>
     </Authenticator.Provider>
@@ -238,18 +258,6 @@ const App = () => {
 const styles = StyleSheet.create({
   signOutButton: {
     alignSelf: "flex-end",
-  },
-  modalContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.5)",
-  },
-  modalContent: {
-    backgroundColor: "white",
-    padding: 20,
-    borderRadius: 8,
-    width: "80%",
   },
   modalTitle: {
     fontSize: 16,
