@@ -15,12 +15,14 @@ import {
 import { HttpLambdaIntegration } from "aws-cdk-lib/aws-apigatewayv2-integrations";
 import { Policy, PolicyStatement } from "aws-cdk-lib/aws-iam";
 import { apiFunction } from "./functions/api-function/resource";
+import { diffFunction } from "./functions/diff-function/resource";
 
 const backend = defineBackend({
   auth,
   data,
   storage,
   apiFunction,
+  diffFunction,
 });
 
 // create a new API stack
@@ -42,6 +44,11 @@ const userPoolAuthorizer = new HttpUserPoolAuthorizer(
 const httpLambdaIntegration = new HttpLambdaIntegration(
   "LambdaIntegration",
   backend.apiFunction.resources.lambda
+);
+
+const diffLambdaIntegration = new HttpLambdaIntegration(
+  "DiffLambdaIntegration",
+  backend.diffFunction.resources.lambda
 );
 
 // create a new HTTP API with IAM as default authorizer
@@ -86,6 +93,19 @@ httpApi.addRoutes({
   integration: httpLambdaIntegration,
 });
 
+httpApi.addRoutes({
+  path: "/diff",
+  methods: [HttpMethod.POST],
+  integration: diffLambdaIntegration,
+  authorizer: iamAuthorizer,
+});
+
+httpApi.addRoutes({
+  path: "/diff",
+  methods: [HttpMethod.OPTIONS],
+  integration: diffLambdaIntegration,
+});
+
 // add route to the API with a User Pool authorizer
 httpApi.addRoutes({
   path: "/cognito-auth-path",
@@ -103,6 +123,8 @@ const apiPolicy = new Policy(apiStack, "ApiPolicy", {
         `${httpApi.arnForExecuteApi("*", "/items")}`,
         `${httpApi.arnForExecuteApi("*", "/items/*")}`,
         `${httpApi.arnForExecuteApi("*", "/cognito-auth-path")}`,
+        `${httpApi.arnForExecuteApi("*", "/diff")}`,
+        `${httpApi.arnForExecuteApi("*", "/diff/*")}`,
       ],
     }),
   ],

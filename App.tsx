@@ -7,10 +7,10 @@ import {
   TextInput,
   Text,
   Pressable,
-  ScrollView,
   FlatList,
   Image,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 
 import { uploadData, list, remove } from "aws-amplify/storage";
@@ -119,6 +119,14 @@ const UploadSection = () => {
       return;
     }
 
+    let existingCount = 0;
+    try {
+      const { items } = await list({ path: `data/${repoName}/` });
+      existingCount = items?.length ?? 0;
+    } catch (e) {
+      console.error("Failed to check repository files", e);
+    }
+
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: "application/pdf",
@@ -142,6 +150,21 @@ const UploadSection = () => {
 
       await uploadData({ path, data: blob }).result;
       console.log("Uploaded", path);
+
+      if (existingCount > 0) {
+        const endpoint = outputs?.custom?.API?.["sample-http-api"]?.endpoint;
+        if (endpoint) {
+          try {
+            await fetch(`${endpoint}diff`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ repo: repoName, key: path }),
+            });
+          } catch (e) {
+            console.error("Failed to trigger diff", e);
+          }
+        }
+      }
 
       setSelectedRepo(null);
       setNewRepoName("");
@@ -189,13 +212,14 @@ const UploadSection = () => {
 
 const App = () => {
   return (
-    <Authenticator.Provider>
-      <Authenticator>
-        <SignOutButton />
-        <UploadSection />
-        {/* You can add more components here to test your API */}
-      </Authenticator>
-    </Authenticator.Provider>
+    <SafeAreaView style={styles.safeArea}>
+      <Authenticator.Provider>
+        <Authenticator>
+          <SignOutButton />
+          <UploadSection />
+        </Authenticator>
+      </Authenticator.Provider>
+    </SafeAreaView>
   );
 };
 
@@ -210,6 +234,7 @@ const styles = StyleSheet.create({
   },
   repoList: {
     flexDirection: "row",
+    flexWrap: "wrap",
     marginBottom: 8,
   },
   repoTile: {
@@ -238,6 +263,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 4,
     marginBottom: 8,
+  },
+  safeArea: {
+    flex: 1,
   },
 });
 

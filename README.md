@@ -45,7 +45,7 @@ Gakufu-hub は、楽譜 PDF／画像をクラウドに保存し、**バージョ
 ## 3. アーキテクチャ
 
 1. ユーザーが新規 PDF をアップロード
-2. S3 **ObjectCreated** → EventBridge → `diffProcessor`
+2. 既存リポジトリの場合、API Gateway 経由で `diffFunction` を呼び出し差分計算を開始
 3. Lambda が「前バージョン」と差分比較 → 変更マスク PNG 生成
 4. 結果ファイルを S3 `/diffs/{scoreId}/{version}.png` へ保存
 5. DynamoDB レコードに diff URL 追加 → クライアントに Push (AppSync subscription)
