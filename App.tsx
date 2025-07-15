@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import {
+  Alert,
   Button,
   View,
   StyleSheet,
@@ -7,18 +8,17 @@ import {
   Text,
   Pressable,
   ScrollView,
+  FlatList,
+  Image,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 
-import { uploadData, list } from "aws-amplify/storage";
+import { uploadData, list, remove } from "aws-amplify/storage";
 
 import { Amplify } from "aws-amplify";
 import { Authenticator, useAuthenticator } from "@aws-amplify/ui-react-native";
 
 // import outputs from "./amplify_outputs.json";
-import { parseAmplifyConfig } from "aws-amplify/utils";
-
-import { get, post } from "aws-amplify/api";
 
 let outputs: any = {};
 try {
@@ -28,33 +28,6 @@ try {
   console.warn("Amplify outputs file missing - backend features disabled");
 }
 
-// const amplifyConfig = parseAmplifyConfig(outputs);
-
-// const restApiConfig = outputs?.custom?.API;
-// const apiNameFromConfig = restApiConfig
-//   ? Object.keys(restApiConfig)[0]
-//   : undefined;
-
-// Amplify.configure(
-//   {
-//     ...amplifyConfig,
-//     ...(restApiConfig && {
-//       API: {
-//         ...amplifyConfig.API,
-//         REST: restApiConfig,
-//       },
-//     }),
-//   },
-//   {
-//     API: {
-//       REST: {
-//         retryStrategy: {
-//           strategy: 'no-retry', // Overrides default retry strategy
-//         },
-//       },
-//     },
-//   }
-// );
 
 Amplify.configure(outputs);
 
@@ -68,51 +41,13 @@ const SignOutButton = () => {
   );
 };
 
-// const ApiTestButton = () => {
-//   const { user } = useAuthenticator();
-
-//   const handleGetData = async () => {
-//     try {
-//       const data = await getDataFromFrontend();
-//       console.log("GET Data:", data);
-//     } catch (error) {
-//       console.error("Error fetching data:", error);
-//     }
-//   };
-
-//   const handlePostData = async () => {
-//     try {
-//       const body = { message: "Hello from React Native!" };
-//       const data = await postDataFromFrontend(body);
-//       console.log("POST Data:", data);
-//     } catch (error) {
-//       console.error("Error posting data:", error);
-//     }
-//   };
-
-//   return (
-//     <View>
-//       <Button title="Get Data" onPress={handleGetData} />
-//       <Button title="Post Data" onPress={handlePostData} />
-//     </View>
-//   );
-// }
-
-// const getDataFromFrontend = () => {
-//   if (!apiNameFromConfig) {
-//     throw new Error('REST API is not configured');
-//   }
-//   const httpOperation = get({
-//     apiName: apiNameFromConfig,
-//     path: '/items',
-//   });
-//   return httpOperation.response.then((resp) => resp.body.json());
-// };
 
 const UploadSection = () => {
   const [repos, setRepos] = useState<string[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const [newRepoName, setNewRepoName] = useState("");
+
+  const thumbnail = require("./assets/icon.png");
 
   useEffect(() => {
     const fetchRepos = async () => {
@@ -148,6 +83,32 @@ const UploadSection = () => {
     } catch (e) {
       console.error("Failed to refresh repositories", e);
     }
+  };
+
+  const deleteRepo = async (name: string) => {
+    try {
+      const { items } = await list({ path: `data/${name}/` });
+      const promises = items?.map((item: any) => remove({ path: item.path }).result) ?? [];
+      await Promise.all(promises);
+      if (selectedRepo === name) {
+        setSelectedRepo(null);
+        setNewRepoName("");
+      }
+      await refreshRepos();
+    } catch (e) {
+      console.error("Failed to delete repository", e);
+    }
+  };
+
+  const confirmDeleteRepo = (name: string) => {
+    Alert.alert("Delete Repository", `${name} を削除しますか？`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => deleteRepo(name),
+      },
+    ]);
   };
 
   const selectFile = async () => {
@@ -194,27 +155,24 @@ const UploadSection = () => {
   return (
     <View>
       <Text style={styles.modalTitle}>Repositories</Text>
-      <ScrollView style={styles.repoList}>
-        <Pressable onPress={() => setSelectedRepo("__new__")}>
-          <Text
-            style={[
-              styles.repoItem,
-              selectedRepo === "__new__" && styles.repoSelected,
-            ]}
+      <FlatList
+        data={["__new__", ...repos]}
+        numColumns={3}
+        keyExtractor={(item) => item}
+        contentContainerStyle={styles.repoList}
+        renderItem={({ item }) => (
+          <Pressable
+            style={[styles.repoTile, selectedRepo === item && styles.repoSelected]}
+            onPress={() => setSelectedRepo(item)}
+            onLongPress={item !== "__new__" ? () => confirmDeleteRepo(item) : undefined}
           >
-            新しいレポジトリ
-          </Text>
-        </Pressable>
-        {repos.map((r) => (
-          <Pressable key={r} onPress={() => setSelectedRepo(r)}>
-            <Text
-              style={[styles.repoItem, selectedRepo === r && styles.repoSelected]}
-            >
-              {r}
+            <Image source={thumbnail} style={styles.repoThumbnail} />
+            <Text style={styles.repoName}>
+              {item === "__new__" ? "新しいレポジトリ" : item}
             </Text>
           </Pressable>
-        ))}
-      </ScrollView>
+        )}
+      />
       {selectedRepo === "__new__" && (
         <TextInput
           placeholder="Repository name"
@@ -228,26 +186,12 @@ const UploadSection = () => {
   );
 };
 
-// const postDataFromFrontend = (body) => {
-//   if (!apiNameFromConfig) {
-//     throw new Error('REST API is not configured');
-//   }
-//   const httpOperation = post({
-//     apiName: apiNameFromConfig,
-//     path: '/items',
-//     options: {
-//       body,
-//     }
-//   });
-//   return httpOperation.response.then((resp) => resp.body.json());
-// };
 
 const App = () => {
   return (
     <Authenticator.Provider>
       <Authenticator>
         <SignOutButton />
-        {/* <ApiTestButton /> */}
         <UploadSection />
         {/* You can add more components here to test your API */}
       </Authenticator>
@@ -265,14 +209,30 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   repoList: {
-    maxHeight: 150,
+    flexDirection: "row",
+    flexWrap: "wrap",
     marginBottom: 8,
   },
-  repoItem: {
+  repoTile: {
+    width: 100,
+    margin: 4,
     padding: 4,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#ccc",
+  },
+  repoThumbnail: {
+    width: 64,
+    height: 64,
+    marginBottom: 4,
+    resizeMode: "contain",
+  },
+  repoName: {
+    textAlign: "center",
   },
   repoSelected: {
-    backgroundColor: "#ddeeff",
+    borderColor: "#3366ff",
+    borderWidth: 2,
   },
   repoInput: {
     borderColor: "#ccc",
