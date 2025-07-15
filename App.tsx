@@ -210,7 +210,6 @@ const styles = StyleSheet.create({
   },
   repoList: {
     flexDirection: "row",
-    flexWrap: "wrap",
     marginBottom: 8,
   },
   repoTile: {
