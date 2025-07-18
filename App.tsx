@@ -155,11 +155,13 @@ const UploadSection = () => {
         const endpoint = outputs?.custom?.API?.["sample-http-api"]?.endpoint;
         if (endpoint) {
           try {
-            await fetch(`${endpoint}diff`, {
+            const res = await fetch(`${endpoint}diff`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ repo: repoName, key: path }),
             });
+            const data = await res.json();
+            console.log("Diff API response:", data); // ← ここでレスポンス内容を確認
           } catch (e) {
             console.error("Failed to trigger diff", e);
           }

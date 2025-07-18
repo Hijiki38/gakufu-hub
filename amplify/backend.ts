@@ -97,7 +97,7 @@ httpApi.addRoutes({
   path: "/diff",
   methods: [HttpMethod.POST],
   integration: diffLambdaIntegration,
-  authorizer: iamAuthorizer,
+  // authorizer: iamAuthorizer,
 });
 
 httpApi.addRoutes({
