@@ -25,6 +25,10 @@ const backend = defineBackend({
   diffFunction,
 });
 
+// Grant storage permissions to the diff function
+backend.diffFunction.addEnvironment("BUCKET_NAME", backend.storage.resources.bucket.bucketName);
+backend.storage.resources.bucket.grantReadWrite(backend.diffFunction.resources.lambda);
+
 // create a new API stack
 const apiStack = backend.createStack("api-stack");
 
