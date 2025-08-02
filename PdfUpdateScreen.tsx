@@ -1,8 +1,8 @@
 // PdfUpdateScreen.tsx
 import React, { useState } from 'react';
-import { View, Button, Text, StyleSheet, Alert } from 'react-native';
+import { View, Button, Text, StyleSheet, Alert, Image } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
-import { uploadData } from 'aws-amplify/storage';
+import { uploadData, getUrl } from 'aws-amplify/storage';
 import { post } from 'aws-amplify/api';
 import { fetchAuthSession } from '@aws-amplify/auth';
 import * as DocumentPicker from 'expo-document-picker';
@@ -28,6 +28,7 @@ export default function PdfUpdateScreen() {
   const { key: oldKey, url: oldUrl } = route.params;
   const [loading, setLoading] = useState<boolean>(false);
   const [newPdf, setNewPdf] = useState<{ uri: string; name: string } | null>(null);
+  const [diffUrl, setDiffUrl] = useState<string | null>(null);
 
   const pickNewPdf = async () => {
     const res = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true });
@@ -100,6 +101,10 @@ export default function PdfUpdateScreen() {
         const { body } = await restResponse.response;
         const apiResult = await body.json();
         console.log('差分処理APIのレスポンス:', apiResult);
+        if (apiResult.diffKey) {
+          const { url } = await getUrl({ path: apiResult.diffKey });
+          setDiffUrl(url.toString());
+        }
       } catch (error) {
         console.error('Error posting data:', error);
       }
@@ -124,6 +129,9 @@ export default function PdfUpdateScreen() {
       <View style={styles.proceed}>
         <Button title="差分処理へ進む" onPress={onProceed} disabled={!newPdf} />
       </View>
+      {diffUrl && (
+        <Image source={{ uri: diffUrl }} style={styles.diffImage} />
+      )}
     </View>
   );
 }
@@ -134,4 +142,5 @@ const styles = StyleSheet.create({
   filename: { marginBottom: 16 },
   selected: { marginTop: 8, fontStyle: 'italic' },
   proceed: { marginTop: 24 },
+  diffImage: { width: '100%', height: 400, marginTop: 16 },
 });
