@@ -7,6 +7,15 @@ import {
 } from "@aws-sdk/client-s3";
 import { PNG } from "pngjs";
 import pixelmatch from "pixelmatch";
+import { createCanvas } from "canvas";
+import {
+  getDocument,
+  GlobalWorkerOptions,
+} from "pdfjs-dist/legacy/build/pdf.js";
+
+// Use bundled worker provided by pdfjs-dist
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+GlobalWorkerOptions.workerSrc = require("pdfjs-dist/legacy/build/pdf.worker.js");
 
 const s3 = new S3Client({});
 const BUCKET_NAME = process.env.BUCKET_NAME || "";
@@ -21,25 +30,20 @@ const streamToBuffer = async (stream: any): Promise<Buffer> => {
 };
 
 async function pdfToPng(buffer: Buffer): Promise<Buffer> {
-  // 一時的にダミーPNG画像を生成（テスト用）
-  console.log("Creating dummy PNG image for testing");
-  
-  const width = 600;
-  const height = 800;
-  const png = new PNG({ width, height });
-  
-  // ダミーの画像データを生成（白い背景）
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = (width * y + x) << 2;
-      png.data[idx] = 255;     // Red
-      png.data[idx + 1] = 255; // Green
-      png.data[idx + 2] = 255; // Blue
-      png.data[idx + 3] = 255; // Alpha
-    }
-  }
-  
-  return PNG.sync.write(png);
+  // Convert the first page of the PDF to a PNG buffer using pdfjs
+  const pdf = await getDocument({ data: buffer }).promise;
+  const page = await pdf.getPage(1);
+
+  const viewport = page.getViewport({ scale: 1.0 });
+  const canvas = createCanvas(viewport.width, viewport.height);
+  const context = canvas.getContext("2d");
+
+  await page.render({
+    canvasContext: context as unknown as CanvasRenderingContext2D,
+    viewport,
+  }).promise;
+
+  return canvas.toBuffer("image/png");
 }
 
 export const handler: APIGatewayProxyHandlerV2 = async (event) => {
