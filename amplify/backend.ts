@@ -71,6 +71,14 @@ httpApi.addRoutes({
   authorizer: iamAuthorizer,
 });
 
+// route for PDF diff processing
+httpApi.addRoutes({
+  path: "/diff",
+  methods: [HttpMethod.POST],
+  integration: httpLambdaIntegration,
+  authorizer: iamAuthorizer,
+});
+
 // add a proxy resource path to the API
 httpApi.addRoutes({
   path: "/items/{proxy+}",
@@ -103,6 +111,7 @@ const apiPolicy = new Policy(apiStack, "ApiPolicy", {
         `${httpApi.arnForExecuteApi("*", "/items")}`,
         `${httpApi.arnForExecuteApi("*", "/items/*")}`,
         `${httpApi.arnForExecuteApi("*", "/cognito-auth-path")}`,
+        `${httpApi.arnForExecuteApi("*", "/diff")}`,
       ],
     }),
   ],
@@ -111,6 +120,12 @@ const apiPolicy = new Policy(apiStack, "ApiPolicy", {
 // attach the policy to the authenticated and unauthenticated IAM roles
 backend.auth.resources.authenticatedUserIamRole.attachInlinePolicy(apiPolicy);
 backend.auth.resources.unauthenticatedUserIamRole.attachInlinePolicy(apiPolicy);
+
+// expose bucket name to Lambda for diff processing
+backend.apiFunction.addEnvironment(
+  'DIFF_BUCKET',
+  backend.storage.resources.bucket.bucketName
+);
 
 // add outputs to the configuration file
 backend.addOutput({
