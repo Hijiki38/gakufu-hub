@@ -18,7 +18,13 @@ import { uploadData, list, remove } from "aws-amplify/storage";
 import { Amplify } from "aws-amplify";
 import { Authenticator, useAuthenticator } from "@aws-amplify/ui-react-native";
 
+import { get, post } from "aws-amplify/api";
+import { parseAmplifyConfig } from "aws-amplify/utils";
+
+
 // import outputs from "./amplify_outputs.json";
+
+
 
 let outputs: any = {};
 try {
@@ -28,8 +34,47 @@ try {
   console.warn("Amplify outputs file missing - backend features disabled");
 }
 
+// Register REST endpoints from outputs.custom.API properly for Amplify API (v6)
+try {
+  const amplifyConfig = parseAmplifyConfig(outputs);
+  const apis = outputs?.custom?.API ?? {};
+  // const entries = Object.entries(apis) as Array<[string, any]>;
+  // const endpoints = entries.flatMap(([keyName, cfg]) => {
+  //   if (!cfg?.endpoint || !cfg?.region) return [];
+  //   return [{
+  //     name: keyName, // use the outputs key as canonical name (e.g., "diffApi")
+  //     endpoint: String(cfg.endpoint).replace(/\/$/, ""),
+  //     region: cfg.region,
+  //   }];
+  // });
+  // // One-time startup log for configured REST endpoints
+  // try {
+  //   const summary = endpoints.map(e => `${e.name} -> ${e.endpoint} (${e.region})`);
+  //   console.log("Amplify REST endpoints configured:", summary);
+  // } catch {}
 
-Amplify.configure(outputs);
+  Amplify.configure({
+    ...amplifyConfig,
+    API: {
+      ...(amplifyConfig?.API || {}),
+      REST: apis,
+    },
+  },
+  {
+    API: {
+      REST: {
+        retryStrategy: {
+          strategy: 'no-retry', // Overrides default retry strategy
+        },
+      }
+    }
+  });
+} catch (e) {
+  console.warn("Failed to configure Amplify REST endpoints", e);
+}
+
+// Canonical REST API name to use for calls (fall back to 'diffApi')
+// const REST_API_NAME: string = Object.keys(outputs?.custom?.API ?? {})[0] || "diffApi";
 
 const SignOutButton = () => {
   const { signOut } = useAuthenticator();
@@ -148,23 +193,78 @@ const UploadSection = () => {
 
       console.log("Uploading to", path);
 
-      await uploadData({ path, data: blob }).result;
+
+      // await uploadData({ path, data: blob }).result;
       console.log("Uploaded", path);
+      console.log("existingCount", existingCount);
+
+      // // debug: call the test function
+      // try {
+      //   const testApiConfig = outputs?.custom?.API?.["testApi"];
+      //   if (!testApiConfig?.endpoint) {
+      //     console.warn("Test API endpoint not configured");
+      //     return;
+      //   }
+      //   console.log("Calling test function");
+      //   const res = get({
+      //     apiName: "testApi",
+      //     path: "/hello-amplify",
+      //     options: {
+      //       headers: {
+      //         "Content-Type": "application/json",
+      //       },
+      //       // authMode: 'AWS_IAM',
+      //     },
+      //   });
+      //   const {body} = await res.response;
+      //   const data = await body.json();
+      //   console.log("Test function response:", data);
+      // } catch (e) {
+      //   console.error("Failed to call test function", e);
+      // }
 
       if (existingCount > 0) {
-        const endpoint = outputs?.custom?.API?.["sample-http-api"]?.endpoint;
-        if (endpoint) {
+        const apiConfig = outputs?.custom?.API?.["diffApiv2"];
+        if (apiConfig?.endpoint) {
           try {
-            const res = await fetch(`${endpoint}diff`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ repo: repoName, key: path }),
+            // console.log("apiName", "diffApi");
+            console.log("endpoint", apiConfig.endpoint);
+            const API_URL = "https://r8gpf1ly2a.execute-api.ap-northeast-1.amazonaws.com" //apiConfig.endpoint.replace(/\/$/, "");
+            // const restmp = await fetch(`${API_URL}/diff`, { method: 'GET' });
+            const restmp = await get({
+              apiName: "diffApiv2", // must match API.REST.endpoints[].name
+              path: "/diff",
+              options: {
+                headers: {
+                  "Content-Type": "application/json",
+                },
+              },
             });
-            const data = await res.json();
-            console.log("Diff API response:", data); // ← ここでレスポンス内容を確認
+            console.log(await 'raw response', restmp);
+            const {body: rb} = await restmp.response;
+            const text = await rb.text();
+            // const text = await restmp.text(); // ← まずは生テキスト
+            // console.log('status', restmp.status, 'headers', Object.fromEntries(restmp.headers), 'body', text);
+            // if (!restmp.ok) throw new Error(`HTTP ${restmp.status}: ${text}`);
+            
+            const res = await post({
+              apiName: "diffApiv2", // must match API.REST.endpoints[].name
+              path: "diff", //"/diff",
+              options: {
+                body: { repo: repoName, key: path },
+                // headers: {
+                //   "Content-Type": "application/json",
+                // },
+              },
+            });
+            const {body} = await res.response;
+            const data = await body.json();
+            console.log("Diff API response:", data);
           } catch (e) {
             console.error("Failed to trigger diff", e);
           }
+        } else {
+          console.warn("Diff API endpoint not configured");
         }
       }
 

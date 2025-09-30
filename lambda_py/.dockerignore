@@ -1,0 +1,7 @@
+# 依存キャッシュ以外の不要物を除外
+**/__pycache__/
+**/*.pyc
+.git
+node_modules
+dist
+build

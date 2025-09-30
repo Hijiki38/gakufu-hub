@@ -1,3 +1,14 @@
 {
-  "type": "module"
+  "type": "module",
+  "name": "amplify",
+  "version": "1.0.0",
+  "scripts": {
+    "android": "expo run:android",
+    "ios": "expo run:ios"
+  },
+  "dependencies": {
+    "expo": "~53.0.22",
+    "react": "19.0.0",
+    "react-native": "0.79.6"
+  }
 }
