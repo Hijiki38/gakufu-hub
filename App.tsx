@@ -194,7 +194,7 @@ const UploadSection = () => {
       console.log("Uploading to", path);
 
 
-      // await uploadData({ path, data: blob }).result;
+      await uploadData({ path, data: blob }).result;
       console.log("Uploaded", path);
       console.log("existingCount", existingCount);
 
@@ -231,18 +231,18 @@ const UploadSection = () => {
             console.log("endpoint", apiConfig.endpoint);
             const API_URL = "https://r8gpf1ly2a.execute-api.ap-northeast-1.amazonaws.com" //apiConfig.endpoint.replace(/\/$/, "");
             // const restmp = await fetch(`${API_URL}/diff`, { method: 'GET' });
-            const restmp = await get({
-              apiName: "diffApiv2", // must match API.REST.endpoints[].name
-              path: "/diff",
-              options: {
-                headers: {
-                  "Content-Type": "application/json",
-                },
-              },
-            });
-            console.log(await 'raw response', restmp);
-            const {body: rb} = await restmp.response;
-            const text = await rb.text();
+            // const restmp = await get({
+            //   apiName: "diffApiv2", // must match API.REST.endpoints[].name
+            //   path: "/diff",
+            //   options: {
+            //     headers: {
+            //       "Content-Type": "application/json",
+            //     },
+            //   },
+            // });
+            // console.log(await 'raw response', restmp);
+            // const {body: rb} = await restmp.response;
+            // const text = await rb.text();
             // const text = await restmp.text(); // ← まずは生テキスト
             // console.log('status', restmp.status, 'headers', Object.fromEntries(restmp.headers), 'body', text);
             // if (!restmp.ok) throw new Error(`HTTP ${restmp.status}: ${text}`);
