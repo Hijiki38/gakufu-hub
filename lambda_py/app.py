@@ -115,14 +115,32 @@ def _render_pdf_pages(pdf_bytes: bytes) -> List[Image.Image]:
     return images
 
 
-def _compute_diffs(new_pages: List[Image.Image], old_pages: List[Image.Image]) -> List[Image.Image]:
-    diffs: List[Image.Image] = []
-    for new_page, old_page in zip(new_pages, old_pages):
-        if new_page.size != old_page.size:
-            old_page = old_page.resize(new_page.size)
-        diff = ImageChops.difference(new_page, old_page)
-        diffs.append(diff.convert("RGB"))
-    return diffs
+def _compute_diff_overlays(base_pages: List[Image.Image], new_pages: List[Image.Image]) -> List[Image.Image]:
+    overlays: List[Image.Image] = []
+    for base_page, new_page in zip(base_pages, new_pages):
+        base_rgb = base_page.convert("RGB")
+        new_rgb = new_page.convert("RGB")
+
+        if base_rgb.size != new_rgb.size:
+            new_rgb = new_rgb.resize(base_rgb.size)
+
+        base_gray = base_rgb.convert("L")
+        new_gray = new_rgb.convert("L")
+        diff = ImageChops.difference(base_gray, new_gray)
+        mask = diff.point(lambda x: 255 if x > 20 else 0)
+
+        r_channel, g_channel, b_channel = base_rgb.split()
+        new_r = r_channel.point(lambda x: 255)  # Highlight differences in red
+        new_g = g_channel.point(lambda x: 0)
+        new_b = b_channel.point(lambda x: 0)
+        new_r.paste(r_channel, mask=ImageChops.invert(mask))
+        new_g.paste(g_channel, mask=ImageChops.invert(mask))
+        new_b.paste(b_channel, mask=ImageChops.invert(mask))
+
+        overlay = Image.merge("RGB", (new_r, new_g, new_b))
+        overlays.append(overlay)
+
+    return overlays
 
 
 def _diffs_to_pdf_bytes(diffs: List[Image.Image]) -> bytes:
@@ -164,8 +182,8 @@ def handler(event, context):
         if len(new_pages) != len(old_pages):
             raise ValueError("Page count mismatch between scores")
 
-        diffs = _compute_diffs(new_pages, old_pages)
-        diff_pdf_bytes = _diffs_to_pdf_bytes(diffs)
+        overlays = _compute_diff_overlays(old_pages, new_pages)
+        diff_pdf_bytes = _diffs_to_pdf_bytes(overlays)
 
         base_dir, filename = os.path.split(new_key)
         name, _ext = os.path.splitext(filename)
@@ -188,7 +206,7 @@ def handler(event, context):
             "diff": {
                 "key": diff_key,
                 "size": len(diff_pdf_bytes),
-                "pageCount": len(diffs),
+                "pageCount": len(overlays),
             },
         }
 

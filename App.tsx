@@ -9,6 +9,7 @@ import {
   Pressable,
   FlatList,
   Image,
+  Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
@@ -20,6 +21,7 @@ import { Authenticator, useAuthenticator } from "@aws-amplify/ui-react-native";
 
 import { get, post } from "aws-amplify/api";
 import { parseAmplifyConfig } from "aws-amplify/utils";
+import ScoreEditorPoc from "./src/editor/ScoreEditorPoc";
 
 
 // import outputs from "./amplify_outputs.json";
@@ -91,6 +93,7 @@ const UploadSection = () => {
   const [repos, setRepos] = useState<string[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const [newRepoName, setNewRepoName] = useState("");
+  const [editorRepo, setEditorRepo] = useState<string | null>(null);
 
   const thumbnail = require("./assets/icon.png");
 
@@ -133,7 +136,7 @@ const UploadSection = () => {
   const deleteRepo = async (name: string) => {
     try {
       const { items } = await list({ path: `data/${name}/` });
-      const promises = items?.map((item: any) => remove({ path: item.path }).result) ?? [];
+      const promises = items?.map((item: any) => remove({ path: item.path })) ?? [];
       await Promise.all(promises);
       if (selectedRepo === name) {
         setSelectedRepo(null);
@@ -306,7 +309,30 @@ const UploadSection = () => {
           style={styles.repoInput}
         />
       )}
-      <Button title="Upload data" onPress={selectFile} />
+      <View style={styles.buttonGroup}>
+        <Button title="Upload data" onPress={selectFile} />
+        <View style={styles.buttonSpacer} />
+        <Button
+          title="Open Editor (PoC)"
+          onPress={() => {
+            if (selectedRepo && selectedRepo !== "__new__") {
+              setEditorRepo(selectedRepo);
+            }
+          }}
+          disabled={!selectedRepo || selectedRepo === "__new__"}
+        />
+      </View>
+
+      <Modal
+        visible={Boolean(editorRepo)}
+        animationType="slide"
+        onRequestClose={() => setEditorRepo(null)}
+        presentationStyle="fullScreen"
+      >
+        {editorRepo && (
+          <ScoreEditorPoc repoName={editorRepo} onClose={() => setEditorRepo(null)} />
+        )}
+      </Modal>
     </View>
   );
 };
@@ -365,6 +391,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 4,
     marginBottom: 8,
+  },
+  buttonGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  buttonSpacer: {
+    width: 12,
   },
   safeArea: {
     flex: 1,
