@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { getUrl, list, uploadData } from "aws-amplify/storage";
+import { post } from "aws-amplify/api";
 import { WebView } from "react-native-webview";
 import type { WebViewSource } from "react-native-webview/lib/WebViewTypes";
 import Svg, { Path } from "react-native-svg";
@@ -35,6 +36,26 @@ const TOOL_COLORS = ["#ff4d6d", "#1d4ed8", "#0f172a"];
 const STORAGE_KEY_PREFIX = "score-editor:strokes:";
 const DEFAULT_PAGE_INDEX = 0;
 const MAX_UNDO = 50;
+
+let outputs: any = {};
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  outputs = require("../../amplify_outputs.json");
+} catch {
+  console.warn("Amplify outputs file missing - diff trigger disabled");
+}
+
+const DIFF_API_NAME: string | null = (() => {
+  const apiEntries = Object.entries(outputs?.custom?.API ?? {});
+  if (outputs?.custom?.API?.diffApiv2) {
+    return "diffApiv2";
+  }
+  if (apiEntries.length > 0) {
+    const [firstName] = apiEntries[0];
+    return firstName;
+  }
+  return null;
+})();
 
 interface ScoreEditorPocProps {
   repoName: string;
@@ -90,6 +111,8 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
   const [pageSize, setPageSize] = useState<PdfPageSize | null>(null);
   const [renderSize, setRenderSize] = useState<PdfPageSize | null>(null);
   const pdfBase64Ref = useRef<string | null>(null);
+  const [diffStatus, setDiffStatus] = useState<string | null>(null);
+  const [diffRunning, setDiffRunning] = useState(false);
 
   const activeStrokeRef = useRef<Stroke | null>(null);
   const cachedPathRef = useRef<string | null>(null);
@@ -206,6 +229,8 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
     setRenderSize(null);
     setPageSize(null);
     pdfBase64Ref.current = null;
+    setDiffStatus(null);
+    setDiffRunning(false);
 
     try {
       const { items } = await list({ path: `data/${repoName}/` });
@@ -508,14 +533,50 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
         },
       }).result;
 
-      Alert.alert("保存しました", "PoC: アノテーションを反映したPDFをアップロードしました。", [
-        {
-          text: "OK",
-          onPress: () => {
-            loadLatestPdf();
+      let diffMessage = "";
+      if (DIFF_API_NAME) {
+        try {
+          setDiffRunning(true);
+          const response = await post({
+            apiName: DIFF_API_NAME,
+            path: "diff",
+            options: {
+              body: {
+                repo: repoName,
+                key: newKey,
+              },
+            },
+          });
+          const { body } = await response.response;
+          const payload: any = await body.json();
+          diffMessage = payload?.diff?.key
+            ? `差分生成: ${payload.diff.key}`
+            : payload?.message ?? "差分処理が完了しました";
+          setDiffStatus(diffMessage);
+        } catch (diffError: any) {
+          console.error("Failed to trigger diff", diffError);
+          diffMessage = diffError?.message ?? "差分処理に失敗しました";
+          setDiffStatus(`差分失敗: ${diffMessage}`);
+        } finally {
+          setDiffRunning(false);
+        }
+      } else {
+        diffMessage = "Diff API が設定されていません";
+        setDiffStatus(diffMessage);
+      }
+
+      Alert.alert(
+        "保存しました",
+        `アノテーションを反映したPDFをアップロードしました。${diffMessage ? `\n${diffMessage}` : ""}`,
+        [
+          {
+            text: "OK",
+            onPress: () => {
+              loadLatestPdf();
+            },
           },
-        },
-      ]);
+        ],
+      );
     } catch (saveError: any) {
       console.error("Failed to save annotated PDF", saveError);
       Alert.alert("保存に失敗しました", saveError?.message ?? "不明なエラーが発生しました");
@@ -553,10 +614,10 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
         </TouchableOpacity>
         <TouchableOpacity
           onPress={handleSave}
-          style={[styles.toolButton, (saving || !latestKey) && styles.toolButtonDisabled]}
-          disabled={saving || !latestKey}
+          style={[styles.toolButton, (saving || diffRunning || !latestKey) && styles.toolButtonDisabled]}
+          disabled={saving || diffRunning || !latestKey}
         >
-          <Text style={styles.toolButtonText}>{saving ? "Saving..." : "Save (PoC)"}</Text>
+          <Text style={styles.toolButtonText}>{saving ? "Saving..." : diffRunning ? "Diffing..." : "Save (PoC)"}</Text>
         </TouchableOpacity>
         <View style={styles.toolbarDivider} />
         {TOOL_COLORS.map((color) => (
@@ -567,6 +628,12 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
           />
         ))}
       </View>
+
+      {diffStatus && (
+        <View style={styles.diffStatusContainer}>
+          <Text style={styles.diffStatusText}>{diffStatus}</Text>
+        </View>
+      )}
 
       <View
         style={styles.canvasContainer}
@@ -692,6 +759,14 @@ const styles = StyleSheet.create({
     width: 1,
     height: 24,
     backgroundColor: "#e2e8f0",
+  },
+  diffStatusContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 4,
+  },
+  diffStatusText: {
+    fontSize: 12,
+    color: "#0f172a",
   },
   toolButton: {
     paddingHorizontal: 12,
