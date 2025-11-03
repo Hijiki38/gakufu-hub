@@ -36,6 +36,9 @@ const TOOL_COLORS = ["#ff4d6d", "#1d4ed8", "#0f172a"];
 const STORAGE_KEY_PREFIX = "score-editor:strokes:";
 const DEFAULT_PAGE_INDEX = 0;
 const MAX_UNDO = 50;
+const ERASER_RADIUS = 0.03; // Normalized radius (0-1) used to detect hit strokes
+
+type DrawingTool = "pen" | "eraser";
 
 let outputs: any = {};
 try {
@@ -105,6 +108,7 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const [undoneStack, setUndoneStack] = useState<Stroke[]>([]);
   const [selectedColor, setSelectedColor] = useState<string>(TOOL_COLORS[0]);
+  const [selectedTool, setSelectedTool] = useState<DrawingTool>("pen");
   const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [saving, setSaving] = useState(false);
   const [latestKey, setLatestKey] = useState<string | null>(null);
@@ -399,6 +403,43 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
     [contentRect, normalizedToLayer],
   );
 
+  const removeStrokesNearLayerPoint = useCallback(
+    (layerX: number, layerY: number) => {
+      if (!contentRect) {
+        return;
+      }
+
+      const targetPoint = layerToNormalized(layerX, layerY);
+      setStrokes((prev) => {
+        let removed: Stroke[] = [];
+        const remaining = prev.filter((stroke) => {
+          if (stroke.pageIndex !== DEFAULT_PAGE_INDEX) {
+            return true;
+          }
+
+          const hit = stroke.points.some((point) => {
+            const dx = point.x - targetPoint.x;
+            const dy = point.y - targetPoint.y;
+            return dx * dx + dy * dy <= ERASER_RADIUS * ERASER_RADIUS;
+          });
+
+          if (hit) {
+            removed.push(stroke);
+            return false;
+          }
+          return true;
+        });
+
+        if (removed.length > 0) {
+          setUndoneStack((stack) => [...removed, ...stack].slice(0, MAX_UNDO));
+        }
+
+        return remaining;
+      });
+    },
+    [contentRect, layerToNormalized],
+  );
+
   const panResponder: PanResponderInstance = useMemo(
     () =>
       PanResponder.create({
@@ -410,39 +451,49 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
           }
 
           const { locationX, locationY } = evt.nativeEvent;
-          const stroke: Stroke = {
-            id: createStrokeId(),
-            color: selectedColor,
-            width: 3,
-            points: [layerToNormalized(locationX, locationY)],
-            pageIndex: DEFAULT_PAGE_INDEX,
-          };
+          if (selectedTool === "pen") {
+            const stroke: Stroke = {
+              id: createStrokeId(),
+              color: selectedColor,
+              width: 3,
+              points: [layerToNormalized(locationX, locationY)],
+              pageIndex: DEFAULT_PAGE_INDEX,
+            };
 
-          activeStrokeRef.current = stroke;
-          setStrokes((prev) => {
-            const next = [...prev, stroke];
-            return next.slice(-MAX_UNDO);
-          });
-          setUndoneStack([]);
+            activeStrokeRef.current = stroke;
+            setStrokes((prev) => {
+              const next = [...prev, stroke];
+              return next.slice(-MAX_UNDO);
+            });
+            setUndoneStack([]);
+          } else {
+            activeStrokeRef.current = null;
+            removeStrokesNearLayerPoint(locationX, locationY);
+          }
         },
         onPanResponderMove: (evt) => {
           if (!contentRect) {
             return;
           }
 
-          const stroke = activeStrokeRef.current;
-          if (!stroke) {
-            return;
-          }
-
           const { locationX, locationY } = evt.nativeEvent;
-          const nextPoint = layerToNormalized(locationX, locationY);
 
-          const points = [...stroke.points, nextPoint];
-          const updatedStroke: Stroke = { ...stroke, points };
-          activeStrokeRef.current = updatedStroke;
+          if (selectedTool === "pen") {
+            const stroke = activeStrokeRef.current;
+            if (!stroke) {
+              return;
+            }
 
-          setStrokes((prev) => prev.map((item) => (item.id === stroke.id ? updatedStroke : item)));
+            const nextPoint = layerToNormalized(locationX, locationY);
+
+            const points = [...stroke.points, nextPoint];
+            const updatedStroke: Stroke = { ...stroke, points };
+            activeStrokeRef.current = updatedStroke;
+
+            setStrokes((prev) => prev.map((item) => (item.id === stroke.id ? updatedStroke : item)));
+          } else {
+            removeStrokesNearLayerPoint(locationX, locationY);
+          }
         },
         onPanResponderRelease: () => {
           activeStrokeRef.current = null;
@@ -451,7 +502,7 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
           activeStrokeRef.current = null;
         },
       }),
-    [contentRect, layerToNormalized, selectedColor],
+    [contentRect, layerToNormalized, removeStrokesNearLayerPoint, selectedColor, selectedTool],
   );
 
   const hexToRgbColor = useCallback((hex: string) => {
@@ -620,6 +671,35 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
           <Text style={styles.toolButtonText}>{saving ? "Saving..." : diffRunning ? "Diffing..." : "Save (PoC)"}</Text>
         </TouchableOpacity>
         <View style={styles.toolbarDivider} />
+        <View style={styles.toolToggleGroup}>
+          <TouchableOpacity
+            onPress={() => setSelectedTool("pen")}
+            style={[styles.toolToggleButton, selectedTool === "pen" && styles.toolToggleButtonActive]}
+          >
+            <Text
+              style={[
+                styles.toolToggleText,
+                selectedTool === "pen" ? styles.toolToggleTextActive : styles.toolToggleTextInactive,
+              ]}
+            >
+              Pen
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setSelectedTool("eraser")}
+            style={[styles.toolToggleButton, selectedTool === "eraser" && styles.toolToggleButtonActive]}
+          >
+            <Text
+              style={[
+                styles.toolToggleText,
+                selectedTool === "eraser" ? styles.toolToggleTextActive : styles.toolToggleTextInactive,
+              ]}
+            >
+              Eraser
+            </Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.toolbarDivider} />
         {TOOL_COLORS.map((color) => (
           <TouchableOpacity
             key={color}
@@ -781,6 +861,32 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 13,
     fontWeight: "600",
+  },
+  toolToggleGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  toolToggleButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#0f172a",
+    backgroundColor: "#ffffff",
+  },
+  toolToggleButtonActive: {
+    backgroundColor: "#0f172a",
+  },
+  toolToggleText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  toolToggleTextActive: {
+    color: "#ffffff",
+  },
+  toolToggleTextInactive: {
+    color: "#0f172a",
   },
   colorChip: {
     width: 32,
