@@ -18,6 +18,7 @@ import Svg, { Path } from "react-native-svg";
 import * as FileSystem from "expo-file-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { PDFDocument, LineCapStyle, rgb } from "pdf-lib";
+import { buildS3Path, PART_LABELS, PartType } from "../../types";
 
 type Point = {
   x: number;
@@ -61,7 +62,8 @@ const DIFF_API_NAME: string | null = (() => {
 })();
 
 interface ScoreEditorPocProps {
-  repoName: string;
+  workName: string;
+  partName: string;
   onClose: () => void;
 }
 
@@ -101,7 +103,7 @@ const base64ToUint8Array = (base64: string): Uint8Array => {
   return bytes;
 };
 
-export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClose }) => {
+export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ workName, partName, onClose }) => {
   const [webSource, setWebSource] = useState<WebViewSource | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -237,7 +239,8 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
     setDiffRunning(false);
 
     try {
-      const { items } = await list({ path: `data/${repoName}/` });
+      // Use 3-tier path
+      const { items } = await list({ path: buildS3Path(workName, partName) });
       const candidates = (items ?? [])
         .filter((item: any) => {
           const key: string = item?.path ?? "";
@@ -251,7 +254,7 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
 
       const latest = candidates[0];
       if (!latest) {
-        setError("このリポジトリに編集可能なPDFが見つかりませんでした");
+        setError(`No PDF found in ${workName}/${partName}`);
         setLoading(false);
         setPageSize(null);
         return;
@@ -297,10 +300,11 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
     } finally {
       setLoading(false);
     }
-  }, [buildViewerHtml, repoName]);
+  }, [buildViewerHtml, workName, partName]);
 
   useEffect(() => {
-    const storageKey = `${STORAGE_KEY_PREFIX}${repoName}`;
+    // Updated storage key format to include part
+    const storageKey = `${STORAGE_KEY_PREFIX}${workName}:${partName}`;
     AsyncStorage.getItem(storageKey)
       .then((raw) => {
         if (!raw) return;
@@ -316,19 +320,19 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
       .finally(() => {
         isLoadedRef.current = true;
       });
-  }, [repoName]);
+  }, [workName, partName]);
 
   useEffect(() => {
     if (!isLoadedRef.current) {
       return;
     }
 
-    const storageKey = `${STORAGE_KEY_PREFIX}${repoName}`;
+    const storageKey = `${STORAGE_KEY_PREFIX}${workName}:${partName}`;
     const trimmed = strokes.slice(-MAX_UNDO);
     AsyncStorage.setItem(storageKey, JSON.stringify(trimmed)).catch((storageError) =>
       console.warn("Failed to persist strokes", storageError),
     );
-  }, [repoName, strokes]);
+  }, [workName, partName, strokes]);
 
   useEffect(() => {
     loadLatestPdf();
@@ -351,14 +355,14 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
         onPress: () => {
           setStrokes([]);
           setUndoneStack([]);
-          const storageKey = `${STORAGE_KEY_PREFIX}${repoName}`;
+          const storageKey = `${STORAGE_KEY_PREFIX}${workName}:${partName}`;
           AsyncStorage.removeItem(storageKey).catch((storageError) =>
             console.warn("Failed to remove cached strokes", storageError),
           );
         },
       },
     ]);
-  }, [repoName]);
+  }, [workName, partName]);
 
   const handleUndo = useCallback(() => {
     setStrokes((prev) => {
@@ -584,6 +588,8 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
         },
       }).result;
 
+      setLatestKey(newKey);
+
       let diffMessage = "";
       if (DIFF_API_NAME) {
         try {
@@ -593,7 +599,8 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
             path: "diff",
             options: {
               body: {
-                repo: repoName,
+                work: workName,
+                part: partName,
                 key: newKey,
               },
             },
@@ -619,14 +626,6 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
       Alert.alert(
         "保存しました",
         `アノテーションを反映したPDFをアップロードしました。${diffMessage ? `\n${diffMessage}` : ""}`,
-        [
-          {
-            text: "OK",
-            onPress: () => {
-              loadLatestPdf();
-            },
-          },
-        ],
       );
     } catch (saveError: any) {
       console.error("Failed to save annotated PDF", saveError);
@@ -634,7 +633,7 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
     } finally {
       setSaving(false);
     }
-  }, [base64ToUint8Array, computeNewKey, hexToRgbColor, latestKey, loadLatestPdf, strokes]);
+  }, [base64ToUint8Array, computeNewKey, hexToRgbColor, latestKey, loadLatestPdf, strokes, workName, partName]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -642,7 +641,7 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ repoName, onClos
         <TouchableOpacity onPress={onClose} style={styles.headerButton}>
           <Text style={styles.headerButtonText}>閉じる</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{repoName} / Editor PoC</Text>
+        <Text style={styles.headerTitle}>{workName} / {partName} / Editor</Text>
         <TouchableOpacity onPress={resetCanvas} style={styles.headerButton}>
           <Text style={styles.headerButtonText}>クリア</Text>
         </TouchableOpacity>

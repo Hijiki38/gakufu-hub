@@ -17,7 +17,7 @@
   - キャッシュ済み PDF を `pdf-lib` で読み込み、現在ページにストロークを線として描画。
   - 新規キーは `computeNewKey` で `basename-annotated-{ISO8601}.pdf` を生成。
   - `uploadData` で `data/{repo}/` にアップロードし、完了後 `post({ apiName: DIFF_API_NAME, path: "diff" })` で差分 Lambda を同期呼び出し。
-  - 成功時は差分キーを含むメッセージを Alert とステータス表示 (`diffStatus`) に反映し、PDF を再読込。
+  - 保存完了後もエディタは開いたままで、同じストロークレイヤーを継続編集できる（PDF の再読込は行わない）。
 - UI 制御
   - `diffStatus` テキストで差分処理結果を表示。
   - `saving` / `diffRunning` フラグにより保存ボタンを無効化し二重送信を防止。

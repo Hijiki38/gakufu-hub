@@ -15,6 +15,9 @@
 
 
 // lambda_node/handler.ts
+// Invokes Python Lambda for PDF diff generation
+// Supports both legacy (repo) and new (work/part) formats
+// Expected body: { work, part, key } or { repo, key }
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
 const client = new LambdaClient({});

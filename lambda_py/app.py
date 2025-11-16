@@ -76,6 +76,7 @@ def _fetch_object(key: str) -> Tuple[Dict[str, Any], bytes]:
 
 
 def _list_repo_objects(repo: str, suffix: str = ".pdf") -> list[Dict[str, Any]]:
+    """Legacy function for backward compatibility. Use _list_part_objects instead."""
     prefix = repo if repo.startswith("data/") else f"data/{repo}/"
     paginator = S3_CLIENT.get_paginator("list_objects_v2")
 
@@ -95,8 +96,39 @@ def _list_repo_objects(repo: str, suffix: str = ".pdf") -> list[Dict[str, Any]]:
     return items
 
 
+def _list_part_objects(work: str, part: str, suffix: str = ".pdf") -> list[Dict[str, Any]]:
+    """List objects for a specific work and part."""
+    prefix = f"data/{work}/{part}/"
+    paginator = S3_CLIENT.get_paginator("list_objects_v2")
+
+    items: list[Dict[str, Any]] = []
+    for page in paginator.paginate(Bucket=BUCKET_NAME, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj.get("Key")
+            if not key:
+                continue
+            # Skip diff artifacts
+            if "/diff/" in key:
+                continue
+            if not suffix or key.endswith(suffix):
+                items.append(obj)
+
+    items.sort(key=lambda x: x.get("LastModified"), reverse=True)
+    return items
+
+
 def _resolve_previous_key(repo: str, current_key: str) -> Optional[str]:
+    """Legacy function for backward compatibility. Use _resolve_previous_key_for_part instead."""
     for obj in _list_repo_objects(repo):
+        key = obj.get("Key")
+        if key and key != current_key:
+            return key
+    return None
+
+
+def _resolve_previous_key_for_part(work: str, part: str, current_key: str) -> Optional[str]:
+    """Find the previous PDF for the same work/part."""
+    for obj in _list_part_objects(work, part):
         key = obj.get("Key")
         if key and key != current_key:
             return key
@@ -159,56 +191,123 @@ def handler(event, context):
             raise RuntimeError("BUCKET_NAME environment variable is not set")
 
         payload = _parse_event(event)
+
+        # Support both old (repo) and new (work/part) formats
+        work = payload.get("work")
+        part = payload.get("part")
         repo = payload.get("repo")
         current_key = payload.get("key")
 
-        if not repo:
-            raise ValueError("'repo' is required")
         if not current_key:
             raise ValueError("'key' is required")
 
-        new_key = current_key if current_key.startswith("data/") else f"data/{repo}/{current_key}"
-        new_score_meta, new_bytes = _fetch_object(new_key)
+        # New 3-tier format (data/{work}/{part}/)
+        if work and part:
+            # Validate part
+            valid_parts = ["vn1", "vn2", "va", "vc", "cb"]
+            if part not in valid_parts:
+                raise ValueError(f"Invalid part '{part}'. Must be one of: {valid_parts}")
 
-        previous_key = _resolve_previous_key(repo, new_key)
-        if not previous_key:
-            raise ValueError("No previous score available for comparison")
+            # Ensure key has correct prefix
+            if not current_key.startswith(f"data/{work}/{part}/"):
+                current_key = f"data/{work}/{part}/{current_key.split('/')[-1]}"
 
-        previous_score_meta, previous_bytes = _fetch_object(previous_key)
+            new_score_meta, new_bytes = _fetch_object(current_key)
 
-        new_pages = _render_pdf_pages(new_bytes)
-        old_pages = _render_pdf_pages(previous_bytes)
+            # Find previous version in same work/part
+            previous_key = _resolve_previous_key_for_part(work, part, current_key)
+            if not previous_key:
+                return {
+                    "ok": False,
+                    "error": f"No previous score available for {work}/{part}",
+                    "work": work,
+                    "part": part,
+                }
 
-        if len(new_pages) != len(old_pages):
-            raise ValueError("Page count mismatch between scores")
+            previous_score_meta, previous_bytes = _fetch_object(previous_key)
 
-        overlays = _compute_diff_overlays(old_pages, new_pages)
-        diff_pdf_bytes = _diffs_to_pdf_bytes(overlays)
+            new_pages = _render_pdf_pages(new_bytes)
+            old_pages = _render_pdf_pages(previous_bytes)
 
-        base_dir, filename = os.path.split(new_key)
-        name, _ext = os.path.splitext(filename)
-        diff_filename = f"{name}_diff.pdf"
-        diff_dir = f"{base_dir}/diff" if base_dir else "diff"
-        diff_key = f"{diff_dir}/{diff_filename}"
+            if len(new_pages) != len(old_pages):
+                raise ValueError("Page count mismatch between scores")
 
-        S3_CLIENT.put_object(
-            Bucket=BUCKET_NAME,
-            Key=diff_key,
-            Body=diff_pdf_bytes,
-            ContentType="application/pdf",
-        )
+            overlays = _compute_diff_overlays(old_pages, new_pages)
+            diff_pdf_bytes = _diffs_to_pdf_bytes(overlays)
 
-        return {
-            "ok": True,
-            "repo": repo,
-            "newScore": new_score_meta,
-            "previousScore": previous_score_meta,
-            "diff": {
-                "key": diff_key,
-                "size": len(diff_pdf_bytes),
-                "pageCount": len(overlays),
-            },
-        }
+            # Build diff path: data/{work}/{part}/diff/{filename}_diff.pdf
+            filename = current_key.split('/')[-1]
+            name, _ext = os.path.splitext(filename)
+            diff_filename = f"{name}_diff.pdf"
+            diff_key = f"data/{work}/{part}/diff/{diff_filename}"
+
+            S3_CLIENT.put_object(
+                Bucket=BUCKET_NAME,
+                Key=diff_key,
+                Body=diff_pdf_bytes,
+                ContentType="application/pdf",
+            )
+
+            return {
+                "ok": True,
+                "work": work,
+                "part": part,
+                "newScore": new_score_meta,
+                "previousScore": previous_score_meta,
+                "diff": {
+                    "key": diff_key,
+                    "size": len(diff_pdf_bytes),
+                    "pageCount": len(overlays),
+                },
+            }
+
+        # Legacy 2-tier format (data/{repo}/)
+        elif repo:
+            new_key = current_key if current_key.startswith("data/") else f"data/{repo}/{current_key}"
+            new_score_meta, new_bytes = _fetch_object(new_key)
+
+            previous_key = _resolve_previous_key(repo, new_key)
+            if not previous_key:
+                raise ValueError("No previous score available for comparison")
+
+            previous_score_meta, previous_bytes = _fetch_object(previous_key)
+
+            new_pages = _render_pdf_pages(new_bytes)
+            old_pages = _render_pdf_pages(previous_bytes)
+
+            if len(new_pages) != len(old_pages):
+                raise ValueError("Page count mismatch between scores")
+
+            overlays = _compute_diff_overlays(old_pages, new_pages)
+            diff_pdf_bytes = _diffs_to_pdf_bytes(overlays)
+
+            base_dir, filename = os.path.split(new_key)
+            name, _ext = os.path.splitext(filename)
+            diff_filename = f"{name}_diff.pdf"
+            diff_dir = f"{base_dir}/diff" if base_dir else "diff"
+            diff_key = f"{diff_dir}/{diff_filename}"
+
+            S3_CLIENT.put_object(
+                Bucket=BUCKET_NAME,
+                Key=diff_key,
+                Body=diff_pdf_bytes,
+                ContentType="application/pdf",
+            )
+
+            return {
+                "ok": True,
+                "repo": repo,
+                "newScore": new_score_meta,
+                "previousScore": previous_score_meta,
+                "diff": {
+                    "key": diff_key,
+                    "size": len(diff_pdf_bytes),
+                    "pageCount": len(overlays),
+                },
+            }
+
+        else:
+            raise ValueError("Either 'work' and 'part', or 'repo' must be provided")
 
     except (ClientError, BotoCoreError) as aws_error:
         message = getattr(aws_error, "response", {}).get("Error", {}).get("Message", str(aws_error))

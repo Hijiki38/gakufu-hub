@@ -22,6 +22,16 @@ import { Authenticator, useAuthenticator } from "@aws-amplify/ui-react-native";
 import { get, post } from "aws-amplify/api";
 import { parseAmplifyConfig } from "aws-amplify/utils";
 import ScoreEditorPoc from "./src/editor/ScoreEditorPoc";
+import {
+  Work,
+  PartInfo,
+  PartType,
+  VALID_PARTS,
+  PART_LABELS,
+  parseS3Path,
+  buildS3Path,
+  isValidPart,
+} from "./types";
 
 
 // import outputs from "./amplify_outputs.json";
@@ -90,89 +100,167 @@ const SignOutButton = () => {
 
 
 const UploadSection = () => {
-  const [repos, setRepos] = useState<string[]>([]);
-  const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
-  const [newRepoName, setNewRepoName] = useState("");
-  const [editorRepo, setEditorRepo] = useState<string | null>(null);
+  // Navigation state
+  type NavigationLevel = 'work' | 'part';
+  const [currentLevel, setCurrentLevel] = useState<NavigationLevel>('work');
+
+  // Work-level state
+  const [works, setWorks] = useState<Work[]>([]);
+  const [selectedWork, setSelectedWork] = useState<string | null>(null);
+  const [newWorkName, setNewWorkName] = useState("");
+
+  // Part-level state
+  const [availableParts, setAvailableParts] = useState<PartInfo[]>([]);
+  const [selectedPart, setSelectedPart] = useState<string | null>(null);
+
+  // Editor state
+  const [editorWork, setEditorWork] = useState<string | null>(null);
+  const [editorPart, setEditorPart] = useState<string | null>(null);
 
   const thumbnail = require("./assets/icon.png");
 
-  useEffect(() => {
-    const fetchRepos = async () => {
-      try {
-        const { items } = await list({ path: "data/" });
-        const repoSet = new Set<string>();
-        items?.forEach((item: any) => {
-          const parts = item.path.split("/");
-          if (parts.length > 1) {
-            repoSet.add(parts[1]);
-          }
-        });
-        setRepos(Array.from(repoSet));
-      } catch (e) {
-        console.error("Failed to list repositories", e);
-      }
-    };
-
-    fetchRepos();
-  }, []);
-
-  const refreshRepos = async () => {
+  // Fetch all works and their parts
+  const fetchWorks = async () => {
     try {
       const { items } = await list({ path: "data/" });
-      const repoSet = new Set<string>();
+      const workMap = new Map<string, Set<string>>();
+
       items?.forEach((item: any) => {
-        const parts = item.path.split("/");
-        if (parts.length > 1) {
-          repoSet.add(parts[1]);
+        try {
+          const parsed = parseS3Path(item.path);
+
+          // Skip diff files
+          if (parsed.isDiff) return;
+
+          // Only process items with both work and part
+          if (parsed.work && parsed.part) {
+            if (!workMap.has(parsed.work)) {
+              workMap.set(parsed.work, new Set());
+            }
+            workMap.get(parsed.work)!.add(parsed.part);
+          }
+        } catch (e) {
+          // Skip items that can't be parsed (e.g., legacy format or invalid paths)
+          console.warn('Failed to parse path:', item.path, e);
         }
       });
-      setRepos(Array.from(repoSet));
+
+      const worksList: Work[] = Array.from(workMap.entries()).map(([name, partsSet]) => ({
+        name,
+        parts: Array.from(partsSet).sort(),
+      }));
+
+      setWorks(worksList);
     } catch (e) {
-      console.error("Failed to refresh repositories", e);
+      console.error("Failed to list works", e);
     }
   };
 
-  const deleteRepo = async (name: string) => {
+  // Fetch parts for a specific work
+  const fetchPartsForWork = async (workName: string) => {
+    try {
+      const { items } = await list({ path: `data/${workName}/` });
+      const partMap = new Map<string, { count: number; latest?: Date }>();
+
+      items?.forEach((item: any) => {
+        try {
+          const parsed = parseS3Path(item.path);
+
+          // Skip diff files
+          if (parsed.isDiff || !parsed.part || !parsed.filename) return;
+
+          const existing = partMap.get(parsed.part) || { count: 0 };
+          const modified = item.lastModified ? new Date(item.lastModified) : undefined;
+
+          partMap.set(parsed.part, {
+            count: existing.count + 1,
+            latest: modified && (!existing.latest || modified > existing.latest)
+              ? modified
+              : existing.latest,
+          });
+        } catch (e) {
+          console.warn('Failed to parse path:', item.path, e);
+        }
+      });
+
+      const partsList: PartInfo[] = Array.from(partMap.entries()).map(([part, info]) => ({
+        part,
+        fileCount: info.count,
+        latestModified: info.latest,
+      }));
+
+      // Sort by part order (vn1, vn2, va, vc, cb)
+      partsList.sort((a, b) => {
+        const indexA = VALID_PARTS.indexOf(a.part as PartType);
+        const indexB = VALID_PARTS.indexOf(b.part as PartType);
+        return indexA - indexB;
+      });
+
+      setAvailableParts(partsList);
+    } catch (e) {
+      console.error("Failed to fetch parts", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchWorks();
+  }, []);
+
+  // Delete a work (all parts)
+  const deleteWork = async (name: string) => {
     try {
       const { items } = await list({ path: `data/${name}/` });
       const promises = items?.map((item: any) => remove({ path: item.path })) ?? [];
       await Promise.all(promises);
-      if (selectedRepo === name) {
-        setSelectedRepo(null);
-        setNewRepoName("");
+
+      if (selectedWork === name) {
+        setSelectedWork(null);
+        setSelectedPart(null);
+        setNewWorkName("");
+        setCurrentLevel('work');
       }
-      await refreshRepos();
+
+      await fetchWorks();
     } catch (e) {
-      console.error("Failed to delete repository", e);
+      console.error("Failed to delete work", e);
     }
   };
 
-  const confirmDeleteRepo = (name: string) => {
-    Alert.alert("Delete Repository", `${name} を削除しますか？`, [
+  const confirmDeleteWork = (name: string) => {
+    Alert.alert("Delete Work", `Delete "${name}" and all its parts?`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
         style: "destructive",
-        onPress: () => deleteRepo(name),
+        onPress: () => deleteWork(name),
       },
     ]);
   };
 
+  // Upload PDF file
   const selectFile = async () => {
-    const repoName =
-      selectedRepo === "__new__" ? newRepoName.trim() : selectedRepo;
+    const workName = selectedWork === "__new__" ? newWorkName.trim() : selectedWork;
+    const partName = selectedPart;
 
-    if (!repoName) {
+    if (!workName || !partName) {
+      Alert.alert("Error", "Please select both work and part");
+      return;
+    }
+
+    // Validate part
+    if (!isValidPart(partName)) {
+      Alert.alert("Error", `Invalid part: ${partName}`);
       return;
     }
 
     let existingCount = 0;
     try {
-      const { items } = await list({ path: `data/${repoName}/` });
-      existingCount = items?.length ?? 0;
+      const { items } = await list({ path: `data/${workName}/${partName}/` });
+      existingCount = items?.filter((item: any) =>
+        !item.path.includes('/diff/')
+      ).length ?? 0;
     } catch (e) {
-      console.error("Failed to check repository files", e);
+      console.error("Failed to check existing files", e);
     }
 
     try {
@@ -192,72 +280,29 @@ const UploadSection = () => {
 
       const response = await fetch(picked.uri);
       const blob = await response.blob();
-      const path = `data/${repoName}/${Date.now()}-${picked.name}`;
+
+      // Build 3-tier path
+      const path = buildS3Path(workName, partName, `${Date.now()}-${picked.name}`);
 
       console.log("Uploading to", path);
 
-
       await uploadData({ path, data: blob }).result;
       console.log("Uploaded", path);
-      console.log("existingCount", existingCount);
 
-      // // debug: call the test function
-      // try {
-      //   const testApiConfig = outputs?.custom?.API?.["testApi"];
-      //   if (!testApiConfig?.endpoint) {
-      //     console.warn("Test API endpoint not configured");
-      //     return;
-      //   }
-      //   console.log("Calling test function");
-      //   const res = get({
-      //     apiName: "testApi",
-      //     path: "/hello-amplify",
-      //     options: {
-      //       headers: {
-      //         "Content-Type": "application/json",
-      //       },
-      //       // authMode: 'AWS_IAM',
-      //     },
-      //   });
-      //   const {body} = await res.response;
-      //   const data = await body.json();
-      //   console.log("Test function response:", data);
-      // } catch (e) {
-      //   console.error("Failed to call test function", e);
-      // }
-
+      // Trigger diff if existing files
       if (existingCount > 0) {
         const apiConfig = outputs?.custom?.API?.["diffApiv2"];
         if (apiConfig?.endpoint) {
           try {
-            // console.log("apiName", "diffApi");
-            console.log("endpoint", apiConfig.endpoint);
-            const API_URL = "https://r8gpf1ly2a.execute-api.ap-northeast-1.amazonaws.com" //apiConfig.endpoint.replace(/\/$/, "");
-            // const restmp = await fetch(`${API_URL}/diff`, { method: 'GET' });
-            // const restmp = await get({
-            //   apiName: "diffApiv2", // must match API.REST.endpoints[].name
-            //   path: "/diff",
-            //   options: {
-            //     headers: {
-            //       "Content-Type": "application/json",
-            //     },
-            //   },
-            // });
-            // console.log(await 'raw response', restmp);
-            // const {body: rb} = await restmp.response;
-            // const text = await rb.text();
-            // const text = await restmp.text(); // ← まずは生テキスト
-            // console.log('status', restmp.status, 'headers', Object.fromEntries(restmp.headers), 'body', text);
-            // if (!restmp.ok) throw new Error(`HTTP ${restmp.status}: ${text}`);
-            
             const res = await post({
-              apiName: "diffApiv2", // must match API.REST.endpoints[].name
-              path: "diff", //"/diff",
+              apiName: "diffApiv2",
+              path: "diff",
               options: {
-                body: { repo: repoName, key: path },
-                // headers: {
-                //   "Content-Type": "application/json",
-                // },
+                body: {
+                  work: workName,
+                  part: partName,
+                  key: path
+                },
               },
             });
             const {body} = await res.response;
@@ -271,66 +316,150 @@ const UploadSection = () => {
         }
       }
 
-      setSelectedRepo(null);
-      setNewRepoName("");
+      // Reset selection
+      setSelectedWork(null);
+      setSelectedPart(null);
+      setNewWorkName("");
+      setCurrentLevel('work');
 
-      await refreshRepos();
+      await fetchWorks();
     } catch (e) {
       console.error("Upload failed", e);
     }
   };
 
-  return (
-    <View>
-      <Text style={styles.modalTitle}>Repositories</Text>
+  // Render work selection screen
+  const renderWorkSelection = () => (
+    <>
+      <Text style={styles.modalTitle}>Works</Text>
       <FlatList
-        data={["__new__", ...repos]}
+        data={["__new__", ...works.map(w => w.name)]}
         numColumns={3}
         keyExtractor={(item) => item}
         contentContainerStyle={styles.repoList}
         renderItem={({ item }) => (
           <Pressable
-            style={[styles.repoTile, selectedRepo === item && styles.repoSelected]}
-            onPress={() => setSelectedRepo(item)}
-            onLongPress={item !== "__new__" ? () => confirmDeleteRepo(item) : undefined}
+            style={[styles.repoTile, selectedWork === item && styles.repoSelected]}
+            onPress={() => {
+              setSelectedWork(item);
+              if (item !== "__new__") {
+                setCurrentLevel('part');
+                fetchPartsForWork(item);
+              }
+            }}
+            onLongPress={item !== "__new__" ? () => confirmDeleteWork(item) : undefined}
           >
             <Image source={thumbnail} style={styles.repoThumbnail} />
             <Text style={styles.repoName}>
-              {item === "__new__" ? "新しいレポジトリ" : item}
+              {item === "__new__" ? "New Work" : item}
             </Text>
           </Pressable>
         )}
       />
-      {selectedRepo === "__new__" && (
+      {selectedWork === "__new__" && (
         <TextInput
-          placeholder="Repository name"
-          value={newRepoName}
-          onChangeText={setNewRepoName}
+          placeholder="Work name (e.g., beethoven-symphony-5)"
+          value={newWorkName}
+          onChangeText={setNewWorkName}
           style={styles.repoInput}
         />
       )}
+    </>
+  );
+
+  // Render part selection screen
+  const renderPartSelection = () => (
+    <>
+      <View style={styles.header}>
+        <Button
+          title="← Back to Works"
+          onPress={() => {
+            setCurrentLevel('work');
+            setSelectedPart(null);
+          }}
+        />
+        <Text style={styles.headerText}>{selectedWork}</Text>
+      </View>
+
+      <Text style={styles.modalTitle}>Select Part</Text>
+
+      {/* All available parts for selection */}
+      <FlatList
+        data={VALID_PARTS}
+        numColumns={2}
+        keyExtractor={(item) => item}
+        contentContainerStyle={styles.repoList}
+        renderItem={({ item }) => {
+          const partInfo = availableParts.find(p => p.part === item);
+          return (
+            <Pressable
+              style={[
+                styles.partTile,
+                selectedPart === item && styles.partSelected
+              ]}
+              onPress={() => setSelectedPart(item)}
+            >
+              <Text style={styles.partName}>{PART_LABELS[item]}</Text>
+              <Text style={styles.partCode}>({item})</Text>
+              {partInfo && (
+                <>
+                  <Text style={styles.partInfo}>{partInfo.fileCount} files</Text>
+                  {partInfo.latestModified && (
+                    <Text style={styles.partDate}>
+                      {partInfo.latestModified.toLocaleDateString()}
+                    </Text>
+                  )}
+                </>
+              )}
+            </Pressable>
+          );
+        }}
+      />
+    </>
+  );
+
+  return (
+    <View>
+      {currentLevel === 'work' && renderWorkSelection()}
+      {currentLevel === 'part' && renderPartSelection()}
+
       <View style={styles.buttonGroup}>
-        <Button title="Upload data" onPress={selectFile} />
+        <Button
+          title="Upload PDF"
+          onPress={selectFile}
+          disabled={!selectedWork || !selectedPart}
+        />
         <View style={styles.buttonSpacer} />
         <Button
           title="Open Editor (PoC)"
           onPress={() => {
-            if (selectedRepo && selectedRepo !== "__new__") {
-              setEditorRepo(selectedRepo);
+            if (selectedWork && selectedWork !== "__new__" && selectedPart) {
+              setEditorWork(selectedWork);
+              setEditorPart(selectedPart);
             }
           }}
-          disabled={!selectedRepo || selectedRepo === "__new__"}
+          disabled={!selectedWork || selectedWork === "__new__" || !selectedPart}
         />
       </View>
 
       <Modal
-        visible={Boolean(editorRepo)}
+        visible={Boolean(editorWork && editorPart)}
         animationType="slide"
-        onRequestClose={() => setEditorRepo(null)}
+        onRequestClose={() => {
+          setEditorWork(null);
+          setEditorPart(null);
+        }}
         presentationStyle="fullScreen"
       >
-        {editorRepo && (
-          <ScoreEditorPoc repoName={editorRepo} onClose={() => setEditorRepo(null)} />
+        {editorWork && editorPart && (
+          <ScoreEditorPoc
+            workName={editorWork}
+            partName={editorPart}
+            onClose={() => {
+              setEditorWork(null);
+              setEditorPart(null);
+            }}
+          />
         )}
       </Modal>
     </View>
@@ -359,6 +488,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
     marginBottom: 8,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#ccc",
+  },
+  headerText: {
+    fontSize: 18,
+    fontWeight: "bold",
   },
   repoList: {
     flexDirection: "row",
@@ -391,6 +533,44 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 4,
     marginBottom: 8,
+  },
+  partTile: {
+    flex: 1,
+    margin: 4,
+    padding: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 8,
+    backgroundColor: "#f9f9f9",
+    minHeight: 100,
+    minWidth: 150,
+  },
+  partSelected: {
+    borderColor: "#3366ff",
+    borderWidth: 2,
+    backgroundColor: "#e6f0ff",
+  },
+  partName: {
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  partCode: {
+    fontSize: 12,
+    color: "#666",
+  },
+  partInfo: {
+    fontSize: 12,
+    color: "#666",
+    marginTop: 4,
+  },
+  partDate: {
+    fontSize: 10,
+    color: "#999",
+    marginTop: 2,
   },
   buttonGroup: {
     flexDirection: "row",
