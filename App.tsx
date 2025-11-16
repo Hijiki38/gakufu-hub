@@ -357,12 +357,26 @@ const UploadSection = () => {
         )}
       />
       {selectedWork === "__new__" && (
+        <>
         <TextInput
           placeholder="Work name (e.g., beethoven-symphony-5)"
           value={newWorkName}
           onChangeText={setNewWorkName}
           style={styles.repoInput}
         />
+          <Button
+            title="Create Work & Select Part"
+            onPress={() => {
+              if (newWorkName.trim()) {
+                setCurrentLevel('part');
+                setAvailableParts([]); // New work has no existing parts
+              } else {
+                Alert.alert("Error", "Please enter a work name");
+              }
+            }}
+            disabled={!newWorkName.trim()}
+          />
+        </>
       )}
     </>
   );
@@ -384,15 +398,12 @@ const UploadSection = () => {
       <Text style={styles.modalTitle}>Select Part</Text>
 
       {/* All available parts for selection */}
-      <FlatList
-        data={VALID_PARTS}
-        numColumns={2}
-        keyExtractor={(item) => item}
-        contentContainerStyle={styles.repoList}
-        renderItem={({ item }) => {
+      <View style={styles.partContainer}>
+        {VALID_PARTS.map((item) => {
           const partInfo = availableParts.find(p => p.part === item);
           return (
             <Pressable
+              key={item}
               style={[
                 styles.partTile,
                 selectedPart === item && styles.partSelected
@@ -413,8 +424,8 @@ const UploadSection = () => {
               )}
             </Pressable>
           );
-        }}
-      />
+        })}
+      </View>
     </>
   );
 
@@ -423,6 +434,8 @@ const UploadSection = () => {
       {currentLevel === 'work' && renderWorkSelection()}
       {currentLevel === 'part' && renderPartSelection()}
 
+      {/* Only show buttons on part selection screen */}
+      {currentLevel === 'part' && (
       <View style={styles.buttonGroup}>
         <Button
           title="Upload PDF"
@@ -441,6 +454,7 @@ const UploadSection = () => {
           disabled={!selectedWork || selectedWork === "__new__" || !selectedPart}
         />
       </View>
+      )}
 
       <Modal
         visible={Boolean(editorWork && editorPart)}
@@ -534,9 +548,15 @@ const styles = StyleSheet.create({
     padding: 4,
     marginBottom: 8,
   },
+  partContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-start",
+    marginBottom: 8,
+  },
   partTile: {
-    flex: 1,
-    margin: 4,
+    width: "47%", // 2 columns with spacing
+    margin: "1.5%",
     padding: 16,
     alignItems: "center",
     justifyContent: "center",
@@ -544,8 +564,7 @@ const styles = StyleSheet.create({
     borderColor: "#ccc",
     borderRadius: 8,
     backgroundColor: "#f9f9f9",
-    minHeight: 100,
-    minWidth: 150,
+    minHeight: 120,
   },
   partSelected: {
     borderColor: "#3366ff",
