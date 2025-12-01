@@ -6,7 +6,11 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "cdk": "cd infrastructure && npx cdk",
+    "cdk:diff": "cd infrastructure && npx cdk diff",
+    "cdk:deploy": "cd infrastructure && npx cdk deploy",
+    "cdk:synth": "cd infrastructure && npx cdk synth"
   },
   "dependencies": {
     "@aws-amplify/react-native": "^1.1.10",
@@ -42,6 +46,7 @@
     "@aws-amplify/backend-cli": "^1.8.0",
     "@babel/core": "^7.25.2",
     "@types/react": "~19.0.10",
+    "aws-cdk": "^2.1033.0",
     "aws-cdk-lib": "^2.189.1",
     "constructs": "^10.4.2",
     "esbuild": "^0.25.5",

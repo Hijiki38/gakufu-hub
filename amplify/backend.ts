@@ -262,14 +262,13 @@ const apiPolicy = new Policy(apiStack, "ApiPolicy", {
 backend.auth.resources.authenticatedUserIamRole.attachInlinePolicy(apiPolicy);
 backend.auth.resources.unauthenticatedUserIamRole.attachInlinePolicy(apiPolicy);
 
-// 出力
+// 出力 - REST API endpoint を amplify_outputs.json に追加
 backend.addOutput({
   custom: {
     API: {
-      [diffHttpApi.httpApiName!]: {
+      diffApiv2: {
         endpoint: diffHttpApi.url,
         region: Stack.of(diffHttpApi).region,
-        apiName: diffHttpApi.httpApiName,
       },
     },
   },

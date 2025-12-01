@@ -1,10 +1,20 @@
 # Gakufu-hub
 
-> **モバイル初段実装：React Native + Expo + Amplify Gen 2 (Code‑First)**
+> **⚠️ 移行計画中（2025-11-27）**
 >
-> **Web 対応：React Native for Web** で同一コードをブラウザ向けビルド
+> 現在、AWS Amplify から素のAWSサーバレスアーキテクチャへの移行を計画中です。
+> 以下に記載されている仕様は**現行版（Amplify使用）**であり、**将来変更される予定**です。
+> 移行計画の詳細は [docs/migration_plan_aws_native.md](docs/migration_plan_aws_native.md) を参照してください。
+
+---
+
+> **現行仕様（変更予定）**
 >
-> **バックエンド：Amplify Gen 2** (CDK ベース) に Auth / Storage / API / Function を定義
+> **モバイル初段実装：React Native + Expo + Amplify Gen 2 (Code‑First)**
+>
+> **Web 対応：React Native for Web** で同一コードをブラウザ向けビルド
+>
+> **バックエンド：Amplify Gen 2** (CDK ベース) に Auth / Storage / API / Function を定義
 
 ---
 
@@ -35,14 +45,14 @@ Gakufu-hub は、楽譜 PDF をクラウドに保存し、**バージョン管�
 
 | フェーズ           | 機能                                      | 技術 / 備考                         |
 | -------------- | --------------------------------------- | ------------------------------- |
-| **MVP (v0.1)** | ユーザー登録 (Cognito) / 楽譜アップロード / バージョン自動管理 | Amplify Auth / Storage (S3)     |
-|                | 差分抽出 (単ページ)                             | Lambda (Python + OpenCV.js)     |
-| **v0.2**       | 複数ページ差分 / Web Viewer                    | React Native for Web, PDF.js    |
+| **MVP (v0.1)** | ユーザー登録 (Cognito) / 楽譜アップロード / バージョン自動管理 | Amplify Auth / Storage (S3)     |
+|                | 差分抽出 (単ページ)                             | Lambda (Python + OpenCV.js)     |
+| **v0.2**       | 複数ページ差分 / Web Viewer                    | React Native for Web, PDF.js    |
 |                | 階層的フォルダ構成（曲→パート階層）                     | S3パス構造変更、UI 3段階ナビゲーション         |
-|                | 共有リンク・アクセス権                             | S3 PresignedUrl, DynamoDB ACL   |
-| **v0.3**       | コメント＆注釈保存                               | AppSync GraphQL + DynamoDB      |
-|                | オフラインキャッシュ                              | Amplify DataStore               |
-| **v1.0**       | モバイル & Web 正式リリース、CI/CD, E2E テスト        | Amplify Hosting, GitHub Actions |
+|                | 共有リンク・アクセス権                             | S3 PresignedUrl, DynamoDB ACL   |
+| **v0.3**       | コメント＆注釈保存                               | AppSync GraphQL + DynamoDB      |
+|                | オフラインキャッシュ                              | Amplify DataStore               |
+| **v1.0**       | モバイル & Web 正式リリース、CI/CD, E2E テスト        | Amplify Hosting, GitHub Actions |
 | **v1.x (将来計画)** | パート間連携機能（他パートのボウイング参照）                | DynamoDB メタデータ層、フレーズタグ付け      |
 |                | パート間フレーズ差分表示                            | 拡張diff Lambda、クロスパート比較UI       |
 
@@ -145,7 +155,7 @@ data/beethoven-symphony-5/cb/1699876543214-score.pdf
 
 * **Node.js:** 24.x
 * **npm:** 11.3.0
-* **AWS CLI:** 
+* **AWS CLI:**
 
 
 ### Quick Start
@@ -168,15 +178,21 @@ npx expo run:ios      # or run:android
 npx expo start --web
 ```
 
+### Amplify と並行で AWS CDK を試す手順（移行準備）
+- ブランチ作成: `git switch -c chore/aws-native-phase0`
+- CDK 初期化済み: `cd infrastructure && npm run build && npx cdk synth`
+- デプロイ対象環境は `STAGE` / `CDK_DEFAULT_ACCOUNT` / `CDK_DEFAULT_REGION` で切替
+- Lambda/API/Storage の実装は Phase1 以降で `infrastructure/lib/` にスタックを追加予定
+
 ---
 
 ## 5. デプロイ環境
 
 | ターゲット           | 手段                                | 備考                                     |
 | --------------- | --------------------------------- | -------------------------------------- |
-| **Web**         | Amplify Hosting (S3 + CloudFront) | Preview Branch 自動発行                    |
-| **iOS/Android** | EAS Build & Submit                | TestFlight / Google Play 内部テスト         |
-| **Backend**     | Amplify Gen2 CI (GitHub Actions)  | `amplify push` → CloudFormation スタック更新 |
+| **Web**         | Amplify Hosting (S3 + CloudFront) | Preview Branch 自動発行                    |
+| **iOS/Android** | EAS Build & Submit                | TestFlight / Google Play 内部テスト         |
+| **Backend**     | Amplify Gen2 CI (GitHub Actions)  | `amplify push` → CloudFormation スタック更新 |
 
 ---
 
@@ -184,7 +200,7 @@ npx expo start --web
 
 1. **Issue 立案** → GitHub Projects (Kanban)
 2. **Feature Branch** で実装
-3. PR 作成 → **GitHub Actions** で Lint/Test/Preview URL
+3. PR 作成 → **GitHub Actions** で Lint/Test/Preview URL
 4. QA OK で `main` にマージ → Amplify / EAS Production デプロイ
 
 ---

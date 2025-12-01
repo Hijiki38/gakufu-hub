@@ -50,39 +50,36 @@ try {
 try {
   const amplifyConfig = parseAmplifyConfig(outputs);
   const apis = outputs?.custom?.API ?? {};
-  // const entries = Object.entries(apis) as Array<[string, any]>;
-  // const endpoints = entries.flatMap(([keyName, cfg]) => {
-  //   if (!cfg?.endpoint || !cfg?.region) return [];
-  //   return [{
-  //     name: keyName, // use the outputs key as canonical name (e.g., "diffApi")
-  //     endpoint: String(cfg.endpoint).replace(/\/$/, ""),
-  //     region: cfg.region,
-  //   }];
-  // });
-  // // One-time startup log for configured REST endpoints
-  // try {
-  //   const summary = endpoints.map(e => `${e.name} -> ${e.endpoint} (${e.region})`);
-  //   console.log("Amplify REST endpoints configured:", summary);
-  // } catch {}
 
-  Amplify.configure({
+  // Clean API configurations: remove redundant apiName field
+  const cleanedApis = Object.fromEntries(
+    Object.entries(apis).map(([name, config]: [string, any]) => [
+      name,
+      {
+        endpoint: config.endpoint,
+        region: config.region,
+      },
+    ])
+  );
+
+  // Merge REST API config into amplifyConfig BEFORE calling configure
+  const finalConfig = {
     ...amplifyConfig,
     API: {
       ...(amplifyConfig?.API || {}),
-      REST: apis,
+      REST: cleanedApis,
     },
-  },
-  {
-    API: {
-      REST: {
-        retryStrategy: {
-          strategy: 'no-retry', // Overrides default retry strategy
-        },
-      }
-    }
-  });
+  };
+
+  // Configure Amplify once with all settings
+  Amplify.configure(finalConfig);
+
+  // Log configured REST endpoints
+  console.log("=== Amplify Configuration ===");
+  console.log("REST API keys:", Object.keys(cleanedApis));
+  console.log("REST APIs:", JSON.stringify(cleanedApis, null, 2));
 } catch (e) {
-  console.warn("Failed to configure Amplify REST endpoints", e);
+  console.warn("Failed to configure Amplify", e);
 }
 
 // Canonical REST API name to use for calls (fall back to 'diffApi')
@@ -291,8 +288,13 @@ const UploadSection = () => {
 
       // Trigger diff if existing files
       if (existingCount > 0) {
-        const apiConfig = outputs?.custom?.API?.["diffApiv2"];
-        if (apiConfig?.endpoint) {
+        // Check if diffApiv2 API exists in outputs
+        const hasApiConfig = outputs?.custom?.API?.["diffApiv2"];
+        console.log("=== Diff API Call Debug ===");
+        console.log("Has API config:", !!hasApiConfig);
+        console.log("Calling post with apiName: diffApiv2");
+
+        if (hasApiConfig) {
           try {
             const res = await post({
               apiName: "diffApiv2",
@@ -358,12 +360,12 @@ const UploadSection = () => {
       />
       {selectedWork === "__new__" && (
         <>
-        <TextInput
-          placeholder="Work name (e.g., beethoven-symphony-5)"
-          value={newWorkName}
-          onChangeText={setNewWorkName}
-          style={styles.repoInput}
-        />
+          <TextInput
+            placeholder="Work name (e.g., beethoven-symphony-5)"
+            value={newWorkName}
+            onChangeText={setNewWorkName}
+            style={styles.repoInput}
+          />
           <Button
             title="Create Work & Select Part"
             onPress={() => {
@@ -436,24 +438,24 @@ const UploadSection = () => {
 
       {/* Only show buttons on part selection screen */}
       {currentLevel === 'part' && (
-      <View style={styles.buttonGroup}>
-        <Button
-          title="Upload PDF"
-          onPress={selectFile}
-          disabled={!selectedWork || !selectedPart}
-        />
-        <View style={styles.buttonSpacer} />
-        <Button
-          title="Open Editor (PoC)"
-          onPress={() => {
-            if (selectedWork && selectedWork !== "__new__" && selectedPart) {
-              setEditorWork(selectedWork);
-              setEditorPart(selectedPart);
-            }
-          }}
-          disabled={!selectedWork || selectedWork === "__new__" || !selectedPart}
-        />
-      </View>
+        <View style={styles.buttonGroup}>
+          <Button
+            title="Upload PDF"
+            onPress={selectFile}
+            disabled={!selectedWork || !selectedPart}
+          />
+          <View style={styles.buttonSpacer} />
+          <Button
+            title="Open Editor (PoC)"
+            onPress={() => {
+              if (selectedWork && selectedWork !== "__new__" && selectedPart) {
+                setEditorWork(selectedWork);
+                setEditorPart(selectedPart);
+              }
+            }}
+            disabled={!selectedWork || selectedWork === "__new__" || !selectedPart}
+          />
+        </View>
       )}
 
       <Modal
