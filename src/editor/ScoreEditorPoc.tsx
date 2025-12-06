@@ -10,8 +10,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+// Amplify imports (only used when USE_NATIVE_API = false)
 import { getUrl, list, uploadData } from "aws-amplify/storage";
 import { post } from "aws-amplify/api";
+// Native API imports
+import { requestPresignedDownload, requestPresignedUpload, listScores } from "../services/storage";
+import { requestDiffGenerate } from "../services/api";
+import { ENV } from "../config/env.sample";
+
 import { WebView } from "react-native-webview";
 import type { WebViewSource } from "react-native-webview/lib/WebViewTypes";
 import Svg, { Path } from "react-native-svg";
@@ -19,6 +25,8 @@ import * as FileSystem from "expo-file-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { PDFDocument, LineCapStyle, rgb } from "pdf-lib";
 import { buildS3Path, PART_LABELS, PartType } from "../../types";
+
+const USE_NATIVE_API = ENV.USE_NATIVE_API === "true";
 
 type Point = {
   x: number;
@@ -239,29 +247,55 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ workName, partNa
     setDiffRunning(false);
 
     try {
-      // Use 3-tier path
-      const { items } = await list({ path: buildS3Path(workName, partName) });
-      const candidates = (items ?? [])
-        .filter((item: any) => {
-          const key: string = item?.path ?? "";
-          return key.endsWith(".pdf") && !key.includes("/diff/");
-        })
-        .sort((a: any, b: any) => {
-          const aTime = a?.lastModified ? new Date(a.lastModified).getTime() : 0;
-          const bTime = b?.lastModified ? new Date(b.lastModified).getTime() : 0;
-          return bTime - aTime;
-        });
+      let latestPath: string;
+      let downloadUrl: string;
 
-      const latest = candidates[0];
-      if (!latest) {
-        setError(`No PDF found in ${workName}/${partName}`);
-        setLoading(false);
-        setPageSize(null);
-        return;
+      if (USE_NATIVE_API) {
+        // Native API mode
+        const response = await listScores(workName, partName);
+        if (!response.items || response.items.length === 0) {
+          setError(`No PDF found in ${workName}/${partName}`);
+          setLoading(false);
+          setPageSize(null);
+          return;
+        }
+
+        // Sort by timestamp descending to get latest
+        const sorted = response.items.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+        const latest = sorted[0];
+        latestPath = latest.s3Key;
+
+        // Get presigned download URL
+        const downloadResponse = await requestPresignedDownload({ s3Key: latestPath });
+        downloadUrl = downloadResponse.downloadUrl;
+      } else {
+        // Amplify mode (existing implementation)
+        const { items } = await list({ path: buildS3Path(workName, partName) });
+        const candidates = (items ?? [])
+          .filter((item: any) => {
+            const key: string = item?.path ?? "";
+            return key.endsWith(".pdf") && !key.includes("/diff/");
+          })
+          .sort((a: any, b: any) => {
+            const aTime = a?.lastModified ? new Date(a.lastModified).getTime() : 0;
+            const bTime = b?.lastModified ? new Date(b.lastModified).getTime() : 0;
+            return bTime - aTime;
+          });
+
+        const latest = candidates[0];
+        if (!latest) {
+          setError(`No PDF found in ${workName}/${partName}`);
+          setLoading(false);
+          setPageSize(null);
+          return;
+        }
+
+        latestPath = latest.path;
+        const { url } = await getUrl({ path: latestPath });
+        downloadUrl = url.toString();
       }
 
-      const { url } = await getUrl({ path: latest.path });
-      setLatestKey(latest.path);
+      setLatestKey(latestPath);
 
       const localPath = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? ""}editor-latest.pdf`;
       if (!localPath) {
@@ -274,7 +308,7 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ workName, partNa
         console.warn("Failed to delete cached PDF", cleanupError);
       }
 
-      const download = await FileSystem.downloadAsync(url.toString(), localPath);
+      const download = await FileSystem.downloadAsync(downloadUrl, localPath);
       cachedPathRef.current = download.uri;
 
       const base64 = await FileSystem.readAsStringAsync(download.uri, {
@@ -580,36 +614,40 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ workName, partNa
       const nextPdfBytes = base64ToUint8Array(nextPdfBase64);
       const newKey = computeNewKey(latestKey);
 
-      await uploadData({
-        path: newKey,
-        data: nextPdfBytes,
-        options: {
-          contentType: "application/pdf",
-        },
-      }).result;
+      if (USE_NATIVE_API) {
+        // Native API mode - use presigned URL upload
+        const fileName = newKey.split('/').pop() || `annotated-${Date.now()}.pdf`;
+        const { uploadUrl, s3Key } = await requestPresignedUpload({
+          work: workName,
+          part: partName,
+          fileName,
+        });
 
-      setLatestKey(newKey);
+        // Upload directly to S3
+        const blob = new Blob([nextPdfBytes.buffer as ArrayBuffer], { type: 'application/pdf' });
+        const uploadResponse = await fetch(uploadUrl, {
+          method: 'PUT',
+          body: blob,
+          headers: { 'Content-Type': 'application/pdf' },
+        });
 
-      let diffMessage = "";
-      if (DIFF_API_NAME) {
+        if (!uploadResponse.ok) {
+          throw new Error('Upload to S3 failed');
+        }
+
+        setLatestKey(s3Key);
+
+        // Trigger diff generation
+        let diffMessage = "";
         try {
           setDiffRunning(true);
-          const response = await post({
-            apiName: DIFF_API_NAME,
-            path: "diff",
-            options: {
-              body: {
-                work: workName,
-                part: partName,
-                key: newKey,
-              },
-            },
+          await requestDiffGenerate({
+            work: workName,
+            part: partName,
+            baseKey: latestKey,
+            targetKey: s3Key,
           });
-          const { body } = await response.response;
-          const payload: any = await body.json();
-          diffMessage = payload?.diff?.key
-            ? `差分生成: ${payload.diff.key}`
-            : payload?.message ?? "差分処理が完了しました";
+          diffMessage = "差分処理が完了しました";
           setDiffStatus(diffMessage);
         } catch (diffError: any) {
           console.error("Failed to trigger diff", diffError);
@@ -618,15 +656,61 @@ export const ScoreEditorPoc: React.FC<ScoreEditorPocProps> = ({ workName, partNa
         } finally {
           setDiffRunning(false);
         }
-      } else {
-        diffMessage = "Diff API が設定されていません";
-        setDiffStatus(diffMessage);
-      }
 
-      Alert.alert(
-        "保存しました",
-        `アノテーションを反映したPDFをアップロードしました。${diffMessage ? `\n${diffMessage}` : ""}`,
-      );
+        Alert.alert(
+          "保存しました",
+          `アノテーションを反映したPDFをアップロードしました。${diffMessage ? `\n${diffMessage}` : ""}`,
+        );
+      } else {
+        // Amplify mode (existing implementation)
+        await uploadData({
+          path: newKey,
+          data: nextPdfBytes,
+          options: {
+            contentType: "application/pdf",
+          },
+        }).result;
+
+        setLatestKey(newKey);
+
+        let diffMessage = "";
+        if (DIFF_API_NAME) {
+          try {
+            setDiffRunning(true);
+            const response = await post({
+              apiName: DIFF_API_NAME,
+              path: "diff",
+              options: {
+                body: {
+                  work: workName,
+                  part: partName,
+                  key: newKey,
+                },
+              },
+            });
+            const { body } = await response.response;
+            const payload: any = await body.json();
+            diffMessage = payload?.diff?.key
+              ? `差分生成: ${payload.diff.key}`
+              : payload?.message ?? "差分処理が完了しました";
+            setDiffStatus(diffMessage);
+          } catch (diffError: any) {
+            console.error("Failed to trigger diff", diffError);
+            diffMessage = diffError?.message ?? "差分処理に失敗しました";
+            setDiffStatus(`差分失敗: ${diffMessage}`);
+          } finally {
+            setDiffRunning(false);
+          }
+        } else {
+          diffMessage = "Diff API が設定されていません";
+          setDiffStatus(diffMessage);
+        }
+
+        Alert.alert(
+          "保存しました",
+          `アノテーションを反映したPDFをアップロードしました。${diffMessage ? `\n${diffMessage}` : ""}`,
+        );
+      }
     } catch (saveError: any) {
       console.error("Failed to save annotated PDF", saveError);
       Alert.alert("保存に失敗しました", saveError?.message ?? "不明なエラーが発生しました");

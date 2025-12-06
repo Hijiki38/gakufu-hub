@@ -263,29 +263,34 @@ gakufu-hub/
 - 完了条件: `cd infrastructure && npm run build && npx cdk synth` が成功し、上記雛形ファイルが揃っていること
 
 ### Phase 1: Infrastructure - Auth Stack（2-3日）
-- Cognito User Pool + Identity Pool の構築
-- IAM ロールの設定
+- Cognito User Pool + Identity Pool の構築（email サインイン、ゲスト許可）
+- IAM ロールの設定（authenticated / unauthenticated）
 - デプロイとテスト
+- 進捗: CDK スタック雛形を実装済み（`gakufu-hub-{stage}-auth`）
 
 ### Phase 2: Infrastructure - Storage Stack（2-3日）
 - S3 Bucket の作成（CORS設定、Lifecycle Policy）
 - DynamoDB Table の作成（ScoreMetadata + GSI）
 - 既存データの移行（オプション）
+- 進捗: CDK スタック雛形を実装済み（`gakufu-hub-{stage}-storage`）。Bucket: `gakufu-hub-storage-{stage}` / Table: `ScoreMetadata-{stage}`
 
 ### Phase 3: Infrastructure - API Stack（3-4日）
 - API Gateway HTTP API v2 の構築
 - Lambda 関数（3つ）の実装とデプロイ
 - Cognito Authorizer の設定
+- 進捗: スタック雛形を実装（`gakufu-hub-{stage}-api`）。Routes `/storage/*`, `/diff/generate` を作成し、プレースホルダ Lambda を接続済み。
 
 ### Phase 4: Frontend - Service Layer（3-4日）
 - `src/services/auth.ts` の実装
 - `src/services/storage.ts` の実装
 - `src/services/api.ts` の実装
+- 進捗: サービス層の雛形を追加（Cognito JS SDK + fetch ベース）。`ENV` は `env.sample.ts` でキー定義済み。
 
 ### Phase 5: Frontend - UI Migration（4-5日）
 - カスタム認証画面の実装
 - `App.tsx` の書き換え（Amplify SDK → 新サービスレイヤー）
 - `ScoreEditorPoc.tsx` の書き換え
+- 進捗: サービス層を読み込むフラグ (`USE_NATIVE_API`) を追加し、UI 移行の足場を作成（切替処理は未実装）。
 
 ### Phase 6: Integration Testing（2-3日）
 - エンドツーエンドの動作確認

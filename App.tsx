@@ -10,17 +10,28 @@ import {
   FlatList,
   Image,
   Modal,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 
+// Amplify imports (only used when USE_NATIVE_API = false)
 import { uploadData, list, remove } from "aws-amplify/storage";
-
 import { Amplify } from "aws-amplify";
 import { Authenticator, useAuthenticator } from "@aws-amplify/ui-react-native";
-
-import { get, post } from "aws-amplify/api";
+import { post } from "aws-amplify/api";
 import { parseAmplifyConfig } from "aws-amplify/utils";
+
+// Native API imports (used when USE_NATIVE_API = true)
+import { ENV } from "./src/config/env.sample";
+import { AuthProvider, useAuth, LoginScreen } from "./src/components/auth";
+import {
+  requestPresignedUpload,
+  listScores,
+  deleteWork as nativeDeleteWork,
+  listAllWorks,
+} from "./src/services/storage";
+import { requestDiffGenerate } from "./src/services/api";
 import ScoreEditorPoc from "./src/editor/ScoreEditorPoc";
 import {
   Work,
@@ -33,169 +44,172 @@ import {
   isValidPart,
 } from "./types";
 
+const USE_NATIVE_API = ENV.USE_NATIVE_API === "true";
 
-// import outputs from "./amplify_outputs.json";
-
-
-
+// Amplify configuration (only needed when USE_NATIVE_API = false)
 let outputs: any = {};
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  outputs = require("./amplify_outputs.json");
-} catch {
-  console.warn("Amplify outputs file missing - backend features disabled");
+if (!USE_NATIVE_API) {
+  try {
+    outputs = require("./amplify_outputs.json");
+    const amplifyConfig = parseAmplifyConfig(outputs);
+    const apis = outputs?.custom?.API ?? {};
+    const cleanedApis = Object.fromEntries(
+      Object.entries(apis).map(([name, config]: [string, any]) => [
+        name,
+        { endpoint: config.endpoint, region: config.region },
+      ])
+    );
+    Amplify.configure({
+      ...amplifyConfig,
+      API: { ...(amplifyConfig?.API || {}), REST: cleanedApis },
+    });
+    console.log("=== Amplify Mode ===");
+  } catch (e) {
+    console.warn("Amplify configuration failed", e);
+  }
+} else {
+  console.log("=== Native API Mode ===");
 }
 
-// Register REST endpoints from outputs.custom.API properly for Amplify API (v6)
-try {
-  const amplifyConfig = parseAmplifyConfig(outputs);
-  const apis = outputs?.custom?.API ?? {};
-
-  // Clean API configurations: remove redundant apiName field
-  const cleanedApis = Object.fromEntries(
-    Object.entries(apis).map(([name, config]: [string, any]) => [
-      name,
-      {
-        endpoint: config.endpoint,
-        region: config.region,
-      },
-    ])
-  );
-
-  // Merge REST API config into amplifyConfig BEFORE calling configure
-  const finalConfig = {
-    ...amplifyConfig,
-    API: {
-      ...(amplifyConfig?.API || {}),
-      REST: cleanedApis,
-    },
-  };
-
-  // Configure Amplify once with all settings
-  Amplify.configure(finalConfig);
-
-  // Log configured REST endpoints
-  console.log("=== Amplify Configuration ===");
-  console.log("REST API keys:", Object.keys(cleanedApis));
-  console.log("REST APIs:", JSON.stringify(cleanedApis, null, 2));
-} catch (e) {
-  console.warn("Failed to configure Amplify", e);
-}
-
-// Canonical REST API name to use for calls (fall back to 'diffApi')
-// const REST_API_NAME: string = Object.keys(outputs?.custom?.API ?? {})[0] || "diffApi";
-
+// Sign Out Button - works with both modes
 const SignOutButton = () => {
-  const { signOut } = useAuthenticator();
-
-  return (
-    <View style={styles.signOutButton}>
-      <Button title="Sign Out" onPress={signOut} />
-    </View>
-  );
+  if (USE_NATIVE_API) {
+    const { signOut } = useAuth();
+    return (
+      <View style={styles.signOutButton}>
+        <Button title="Sign Out" onPress={signOut} />
+      </View>
+    );
+  } else {
+    const { signOut } = useAuthenticator();
+    return (
+      <View style={styles.signOutButton}>
+        <Button title="Sign Out" onPress={signOut} />
+      </View>
+    );
+  }
 };
 
-
 const UploadSection = () => {
-  // Navigation state
   type NavigationLevel = 'work' | 'part';
   const [currentLevel, setCurrentLevel] = useState<NavigationLevel>('work');
-
-  // Work-level state
   const [works, setWorks] = useState<Work[]>([]);
   const [selectedWork, setSelectedWork] = useState<string | null>(null);
   const [newWorkName, setNewWorkName] = useState("");
-
-  // Part-level state
   const [availableParts, setAvailableParts] = useState<PartInfo[]>([]);
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
-
-  // Editor state
   const [editorWork, setEditorWork] = useState<string | null>(null);
   const [editorPart, setEditorPart] = useState<string | null>(null);
-
   const thumbnail = require("./assets/icon.png");
 
-  // Fetch all works and their parts
+  // Fetch all works - supports both modes
   const fetchWorks = async () => {
     try {
-      const { items } = await list({ path: "data/" });
-      const workMap = new Map<string, Set<string>>();
+      if (USE_NATIVE_API) {
+        // Native API mode
+        const response = await listAllWorks();
+        setWorks(response.works || []);
+      } else {
+        // Amplify mode (existing implementation)
+        const { items } = await list({ path: "data/" });
+        const workMap = new Map<string, Set<string>>();
 
-      items?.forEach((item: any) => {
-        try {
-          const parsed = parseS3Path(item.path);
-
-          // Skip diff files
-          if (parsed.isDiff) return;
-
-          // Only process items with both work and part
-          if (parsed.work && parsed.part) {
-            if (!workMap.has(parsed.work)) {
-              workMap.set(parsed.work, new Set());
+        items?.forEach((item: any) => {
+          try {
+            const parsed = parseS3Path(item.path);
+            if (parsed.isDiff) return;
+            if (parsed.work && parsed.part) {
+              if (!workMap.has(parsed.work)) {
+                workMap.set(parsed.work, new Set());
+              }
+              workMap.get(parsed.work)!.add(parsed.part);
             }
-            workMap.get(parsed.work)!.add(parsed.part);
+          } catch (e) {
+            console.warn('Failed to parse path:', item.path, e);
           }
-        } catch (e) {
-          // Skip items that can't be parsed (e.g., legacy format or invalid paths)
-          console.warn('Failed to parse path:', item.path, e);
-        }
-      });
+        });
 
-      const worksList: Work[] = Array.from(workMap.entries()).map(([name, partsSet]) => ({
-        name,
-        parts: Array.from(partsSet).sort(),
-      }));
+        const worksList: Work[] = Array.from(workMap.entries()).map(([name, partsSet]) => ({
+          name,
+          parts: Array.from(partsSet).sort(),
+        }));
 
-      setWorks(worksList);
+        setWorks(worksList);
+      }
     } catch (e) {
       console.error("Failed to list works", e);
+      Alert.alert("Error", "Failed to load works");
     }
   };
 
   // Fetch parts for a specific work
   const fetchPartsForWork = async (workName: string) => {
     try {
-      const { items } = await list({ path: `data/${workName}/` });
-      const partMap = new Map<string, { count: number; latest?: Date }>();
+      if (USE_NATIVE_API) {
+        // Native API mode - list all parts for this work
+        // Note: We need to iterate through all valid parts
+        const partsList: PartInfo[] = [];
 
-      items?.forEach((item: any) => {
-        try {
-          const parsed = parseS3Path(item.path);
-
-          // Skip diff files
-          if (parsed.isDiff || !parsed.part || !parsed.filename) return;
-
-          const existing = partMap.get(parsed.part) || { count: 0 };
-          const modified = item.lastModified ? new Date(item.lastModified) : undefined;
-
-          partMap.set(parsed.part, {
-            count: existing.count + 1,
-            latest: modified && (!existing.latest || modified > existing.latest)
-              ? modified
-              : existing.latest,
-          });
-        } catch (e) {
-          console.warn('Failed to parse path:', item.path, e);
+        for (const part of VALID_PARTS) {
+          try {
+            const response = await listScores(workName, part);
+            if (response.items && response.items.length > 0) {
+              const latest = response.items.reduce((prev, current) =>
+                (prev.uploadedAt > current.uploadedAt) ? prev : current
+              );
+              partsList.push({
+                part,
+                fileCount: response.items.length,
+                latestModified: new Date(latest.uploadedAt),
+              });
+            }
+          } catch (e) {
+            // Part has no files, skip
+          }
         }
-      });
 
-      const partsList: PartInfo[] = Array.from(partMap.entries()).map(([part, info]) => ({
-        part,
-        fileCount: info.count,
-        latestModified: info.latest,
-      }));
+        setAvailableParts(partsList);
+      } else {
+        // Amplify mode (existing implementation)
+        const { items } = await list({ path: `data/${workName}/` });
+        const partMap = new Map<string, { count: number; latest?: Date }>();
 
-      // Sort by part order (vn1, vn2, va, vc, cb)
-      partsList.sort((a, b) => {
-        const indexA = VALID_PARTS.indexOf(a.part as PartType);
-        const indexB = VALID_PARTS.indexOf(b.part as PartType);
-        return indexA - indexB;
-      });
+        items?.forEach((item: any) => {
+          try {
+            const parsed = parseS3Path(item.path);
+            if (parsed.isDiff || !parsed.part || !parsed.filename) return;
 
-      setAvailableParts(partsList);
+            const existing = partMap.get(parsed.part) || { count: 0 };
+            const modified = item.lastModified ? new Date(item.lastModified) : undefined;
+
+            partMap.set(parsed.part, {
+              count: existing.count + 1,
+              latest: modified && (!existing.latest || modified > existing.latest)
+                ? modified
+                : existing.latest,
+            });
+          } catch (e) {
+            console.warn('Failed to parse path:', item.path, e);
+          }
+        });
+
+        const partsList: PartInfo[] = Array.from(partMap.entries()).map(([part, info]) => ({
+          part,
+          fileCount: info.count,
+          latestModified: info.latest,
+        }));
+
+        partsList.sort((a, b) => {
+          const indexA = VALID_PARTS.indexOf(a.part as PartType);
+          const indexB = VALID_PARTS.indexOf(b.part as PartType);
+          return indexA - indexB;
+        });
+
+        setAvailableParts(partsList);
+      }
     } catch (e) {
       console.error("Failed to fetch parts", e);
+      Alert.alert("Error", "Failed to load parts");
     }
   };
 
@@ -204,11 +218,17 @@ const UploadSection = () => {
   }, []);
 
   // Delete a work (all parts)
-  const deleteWork = async (name: string) => {
+  const handleDeleteWork = async (name: string) => {
     try {
-      const { items } = await list({ path: `data/${name}/` });
-      const promises = items?.map((item: any) => remove({ path: item.path })) ?? [];
-      await Promise.all(promises);
+      if (USE_NATIVE_API) {
+        // Native API mode
+        await nativeDeleteWork(name);
+      } else {
+        // Amplify mode (existing implementation)
+        const { items } = await list({ path: `data/${name}/` });
+        const promises = items?.map((item: any) => remove({ path: item.path })) ?? [];
+        await Promise.all(promises);
+      }
 
       if (selectedWork === name) {
         setSelectedWork(null);
@@ -220,6 +240,7 @@ const UploadSection = () => {
       await fetchWorks();
     } catch (e) {
       console.error("Failed to delete work", e);
+      Alert.alert("Error", "Failed to delete work");
     }
   };
 
@@ -229,7 +250,7 @@ const UploadSection = () => {
       {
         text: "Delete",
         style: "destructive",
-        onPress: () => deleteWork(name),
+        onPress: () => handleDeleteWork(name),
       },
     ]);
   };
@@ -244,20 +265,9 @@ const UploadSection = () => {
       return;
     }
 
-    // Validate part
     if (!isValidPart(partName)) {
       Alert.alert("Error", `Invalid part: ${partName}`);
       return;
-    }
-
-    let existingCount = 0;
-    try {
-      const { items } = await list({ path: `data/${workName}/${partName}/` });
-      existingCount = items?.filter((item: any) =>
-        !item.path.includes('/diff/')
-      ).length ?? 0;
-    } catch (e) {
-      console.error("Failed to check existing files", e);
     }
 
     try {
@@ -278,43 +288,76 @@ const UploadSection = () => {
       const response = await fetch(picked.uri);
       const blob = await response.blob();
 
-      // Build 3-tier path
-      const path = buildS3Path(workName, partName, `${Date.now()}-${picked.name}`);
+      if (USE_NATIVE_API) {
+        // Native API mode - use presigned URL
+        const fileName = `${Date.now()}-${picked.name}`;
+        const { uploadUrl, s3Key } = await requestPresignedUpload({
+          work: workName,
+          part: partName,
+          fileName,
+        });
 
-      console.log("Uploading to", path);
+        // Upload directly to S3
+        const uploadResponse = await fetch(uploadUrl, {
+          method: 'PUT',
+          body: blob,
+          headers: { 'Content-Type': 'application/pdf' },
+        });
 
-      await uploadData({ path, data: blob }).result;
-      console.log("Uploaded", path);
+        if (!uploadResponse.ok) {
+          throw new Error('Upload to S3 failed');
+        }
 
-      // Trigger diff if existing files
-      if (existingCount > 0) {
-        // Check if diffApiv2 API exists in outputs
-        const hasApiConfig = outputs?.custom?.API?.["diffApiv2"];
-        console.log("=== Diff API Call Debug ===");
-        console.log("Has API config:", !!hasApiConfig);
-        console.log("Calling post with apiName: diffApiv2");
+        console.log("Uploaded to S3:", s3Key);
 
-        if (hasApiConfig) {
-          try {
-            const res = await post({
-              apiName: "diffApiv2",
-              path: "diff",
-              options: {
-                body: {
-                  work: workName,
-                  part: partName,
-                  key: path
-                },
-              },
+        // Trigger diff if there are existing files
+        try {
+          const existing = await listScores(workName, partName);
+          if (existing.items && existing.items.length > 1) {
+            const sorted = existing.items.sort((a, b) =>
+              b.timestamp.localeCompare(a.timestamp)
+            );
+            await requestDiffGenerate({
+              work: workName,
+              part: partName,
+              baseKey: sorted[1].s3Key,
+              targetKey: s3Key,
             });
-            const {body} = await res.response;
-            const data = await body.json();
-            console.log("Diff API response:", data);
-          } catch (e) {
-            console.error("Failed to trigger diff", e);
+            console.log("Diff generation triggered");
           }
-        } else {
-          console.warn("Diff API endpoint not configured");
+        } catch (e) {
+          console.warn("Failed to trigger diff", e);
+        }
+      } else {
+        // Amplify mode (existing implementation)
+        const path = buildS3Path(workName, partName, `${Date.now()}-${picked.name}`);
+        await uploadData({ path, data: blob }).result;
+        console.log("Uploaded", path);
+
+        // Check for existing files and trigger diff
+        const { items } = await list({ path: `data/${workName}/${partName}/` });
+        const existingCount = items?.filter((item: any) =>
+          !item.path.includes('/diff/')
+        ).length ?? 0;
+
+        if (existingCount > 0) {
+          const hasApiConfig = outputs?.custom?.API?.["diffApiv2"];
+          if (hasApiConfig) {
+            try {
+              const res = await post({
+                apiName: "diffApiv2",
+                path: "diff",
+                options: {
+                  body: { work: workName, part: partName, key: path },
+                },
+              });
+              const { body } = await res.response;
+              const data = await body.json();
+              console.log("Diff API response:", data);
+            } catch (e) {
+              console.error("Failed to trigger diff", e);
+            }
+          }
         }
       }
 
@@ -325,8 +368,10 @@ const UploadSection = () => {
       setCurrentLevel('work');
 
       await fetchWorks();
+      Alert.alert("Success", "File uploaded successfully");
     } catch (e) {
       console.error("Upload failed", e);
+      Alert.alert("Error", "Upload failed");
     }
   };
 
@@ -371,7 +416,7 @@ const UploadSection = () => {
             onPress={() => {
               if (newWorkName.trim()) {
                 setCurrentLevel('part');
-                setAvailableParts([]); // New work has no existing parts
+                setAvailableParts([]);
               } else {
                 Alert.alert("Error", "Please enter a work name");
               }
@@ -399,7 +444,6 @@ const UploadSection = () => {
 
       <Text style={styles.modalTitle}>Select Part</Text>
 
-      {/* All available parts for selection */}
       <View style={styles.partContainer}>
         {VALID_PARTS.map((item) => {
           const partInfo = availableParts.find(p => p.part === item);
@@ -436,7 +480,6 @@ const UploadSection = () => {
       {currentLevel === 'work' && renderWorkSelection()}
       {currentLevel === 'part' && renderPartSelection()}
 
-      {/* Only show buttons on part selection screen */}
       {currentLevel === 'part' && (
         <View style={styles.buttonGroup}>
           <Button
@@ -482,18 +525,59 @@ const UploadSection = () => {
   );
 };
 
+// Main App component with conditional rendering
+const AppContent = () => {
+  if (USE_NATIVE_API) {
+    // Native API mode - use custom auth
+    const { isAuthenticated, isLoading } = useAuth();
+
+    if (isLoading) {
+      return (
+        <SafeAreaView style={styles.safeArea}>
+          <ActivityIndicator size="large" />
+        </SafeAreaView>
+      );
+    }
+
+    if (!isAuthenticated) {
+      return (
+        <SafeAreaView style={styles.safeArea}>
+          <LoginScreen />
+        </SafeAreaView>
+      );
+    }
+
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <SignOutButton />
+        <UploadSection />
+      </SafeAreaView>
+    );
+  } else {
+    // Amplify mode - use Amplify Authenticator
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <Authenticator.Provider>
+          <Authenticator>
+            <SignOutButton />
+            <UploadSection />
+          </Authenticator>
+        </Authenticator.Provider>
+      </SafeAreaView>
+    );
+  }
+};
 
 const App = () => {
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <Authenticator.Provider>
-        <Authenticator>
-          <SignOutButton />
-          <UploadSection />
-        </Authenticator>
-      </Authenticator.Provider>
-    </SafeAreaView>
-  );
+  if (USE_NATIVE_API) {
+    return (
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    );
+  } else {
+    return <AppContent />;
+  }
 };
 
 const styles = StyleSheet.create({
@@ -557,7 +641,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   partTile: {
-    width: "47%", // 2 columns with spacing
+    width: "47%",
     margin: "1.5%",
     padding: 16,
     alignItems: "center",
